@@ -14,42 +14,41 @@ def main():
     """
     
     # test make_adjlist
-    testadjlist = utils.make_adjlist('test.csv',0) # truong paper uses threshold of 0.7
+    testadjlist = utils.make_adjlist('data/test.csv',0) # truong paper uses threshold of 0.7
     print(testadjlist)
     print('\n')
+    
     # get the GRAND GRN by running on miles' nodes
-    #brainother = utils.make_adjlist('Brain_Other.csv',0.0) #
-    #brainbg = utils.make_adjlist('Brain_Basal_Ganglia.csv',0.0)
+    #brainother = utils.make_adjlist('data/Brain_Other.csv',0.0) 
+    #brainbg = utils.make_adjlist('data/Brain_Basal_Ganglia.csv',0.0)
     
     # test merge_adjlist's weight-averaging feature: AHR-A1BG SHOULD have a weight of ~0.2
-    newadjlist = {'AHR': [('A1BG', 0.0), ('A4GALT', 0.314864), ('AHR', 0.131604), ('ALX3', 0.208409)], 'AIRE': [('A1CF', 3.340785), ('A2M', 0.365588)], 'ALX1': [('A1CF', 0.181709), ('A2M', 0.485148)], 'ALX3': [('A1CF', 0.208687), ('A2M', 3.764654)]}
-    testmerge = utils.merge_adjlist(testadjlist,newadjlist)
-    print(testmerge)
+    testadjlist2 = {'AHR': [('A1BG', 0.0), ('A4GALT', 0.314864), ('AHR', 0.131604), ('ALX3', 0.208409)]}
+    testmerge = utils.merge_adjlist(testadjlist,testadjlist2)
+    print(testmerge,'\n')
 
     # merge the two brain GRNs (also on cluster)
     #brain = utils.merge_adjlist(brainother, brainbg)
     
     # get adjlists per disorder 
-    testlist = ['AHR', 'ALX3','A1BG']
-    ## reduce brain 
-    # A1BG shouldn't appear in
+    #degs_disorder outputs list
+    testdisorder = ['AHR', 'ALX3']
     
+    # reduce GRN to just those in disorder list
+    deggraph = utils.filter_adjlist(testmerge,testdisorder)
+    print(deggraph)
     ## for now, input is DEGDataSample.csv
     
+    # visualize graph in new file
     
-    # function to combine adjlists?
-    
-    # create graph
-    
-    # calculate graph metrics (use an existing package)
-    
-    #                                                                                                                  
-    # visualize
+    # calculate graph metrics (use an existing package?)
     
     
     return 
 
-def disorder_lists(*disorder:str): # generates the concatenated list of n number of disorders 
+
+
+def disorder_lists(*disorder:str): # generates the concatenated list of n number of disorders queried by terminal input
     
     
     

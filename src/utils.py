@@ -2,8 +2,8 @@ import random
 import csv
 import requests
 import re # use regex
-from collections import defaultdict # cool 
-# GRN =  dictionary:str (TFs) of lists:str (Genes) of tuples:(str,float) (Weights)
+import numpy as np
+# GRN in the form of adjacency list (adjlist) = dictionary:str (TFs) of lists:str (Genes) of tuples:(str,float) (Weights)
 ## eg {AHR:[(A1BG,0.47),(A1CF,-0.89)]..., AIRE:[(x,y),(a,b)]}
 ENSEMBL_REST = "https://rest.ensembl.org"
 HEADERS = {"Content-Type": "application/json"}
@@ -55,15 +55,37 @@ def adjlist2adjmat(adjlist:dict): # if including adjmat as a file, include outpu
     
     return
 
-def merge_adjlist(*oldgraph): # should be able to input any num of adjlists to merge
+def merge_adjlist(*oldgraph):
     """
     Inputs n number of adjacency list containing a GRN, combine all
-    Merge repeated TF-gene pairs between graphs, averaging the weights for duplicates
+    Merge repeated TF-gene pairs between graphs, averaging the weights for duplicates using numpy
     
     Outputs an averaged GRN, with the caveat that this may have limited biological applicability as it is previously untested
     """
+    edge_weights = {}  # tracks repeats across grns for each tf-gene pair, eg {(AHR,A1BG):[weight in GRN1, weight in GRN2...]}
+    
+
+    for graph in oldgraph:
+        for tf, edges in graph.items():
+            for gene, weight in edges:
+                edge = (tf, gene)
+                if edge not in edge_weights:
+                    edge_weights[edge] = []
+                edge_weights[edge].append(weight) # collects repeat weights
+
     newgraph = {}
-    seen_edges = set() # tracks repeats
+    for (tf, gene), weights in edge_weights.items():
+        mean_weight = float(np.mean(weights))
+        if tf not in newgraph:
+            newgraph[tf] = []
+        newgraph[tf].append((gene, mean_weight))
+
+    return newgraph
+
+def old_merge_adjlist(*oldgraph): # DOES NOT AVERAGE REPEATS, CHOOSES FIRST WEIGHT
+    
+    newgraph = {}
+    seen_edges = set() # tracks repeats, not necessary since dicts already remove dups
     
     for graph in oldgraph: # loops through each GRN 
         for tf, edges in graph.items(): # loops through both key (tf) and value (tuple of (gene,weight))
@@ -72,11 +94,7 @@ def merge_adjlist(*oldgraph): # should be able to input any num of adjlists to m
             
             for gene, weight in edges:
                 edge = (tf, gene)
-                print(weight)
-                for i in newgraph:
-                    print(type(i))
-                    if edge in i:
-                        print(gene)
+
                 if edge not in seen_edges: 
                     newgraph[tf].append((gene,weight))
                     seen_edges.add(edge)  
@@ -99,19 +117,25 @@ def degs_disorder(filename:str, *disorder:str):
     """
     degs = []
     
+    with open(filename, "r", newline="") as file:
+        reader = csv.reader(file)
+    
     return degs
      
-def filter_adjlist(adjlist:dict, disorder:list): # should be *disorder to take mult inputs?
+def filter_adjlist(oldgraph:dict, disorder:list): # should be *disorder to take mult inputs?
     """
     Inputs an adjacency list representing a complete GRN
     Outputs filtered adjlist reducing the keys in a GRN to just those of the inputted list
     """
+    newgraph = {}
     
+    for tf, edges in oldgraph.items(): # edges = (gene,weight)
+        if tf in disorder and tf not in newgraph:
+            newgraph[tf] = edges            
     
-    return 
+    return newgraph
     
-
-def make_adjlist(filename:str, threshold:float): 
+def make_adjlist(filename:str, threshold:float): # made with help from chatgpt
     """
     Inputs path:str to csv of genes (str); data has formatting requirements and a weight for the necessary threshold
     
@@ -141,3 +165,9 @@ def make_adjlist(filename:str, threshold:float):
                     
     return adj #adjacency list of the graph
 
+def viz_graph(adjlist): # saves an html file of visualized graph
+    
+    
+    
+    
+    return
