@@ -5,9 +5,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/%x-%j.out
-#SBATCH --error=logs/%x-%j.err
-
-set -euo pipefail
+#SBATCH --error=logs/%x-%j.errset -euo pipefail
 
 mkdir -p logs
 

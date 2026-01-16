@@ -39,21 +39,16 @@ def main():
   
     # convert to ENSEMBL
     ensemblify(deggrn)
-                
-
-    
     print(deggrn)
     
     ## for now, input is DEGDataSample.csv
     
     # visualize graph in new file
     
-    
     # calculate graph metrics (use an existing package?)
     
     
     return 
-
 
 
 def disorder_lists(*disorder:str): # generates the concatenated list of n number of disorders queried by terminal input
@@ -63,14 +58,40 @@ def disorder_lists(*disorder:str): # generates the concatenated list of n number
     
     return 
 
+def merge_disorder(*filename:str): # UNFINISHED
+    """
+    Inputs file paths for sets of disorders of interest. 
+    These are csvs in the following format: DISORDER | STUDY | YEAR | TISSUE | GENEID | LOG2FC | PVAL
+    
+    Outputs a csv in the data subdirectory merging the disorders. What to do with repeats?
+    """   
+    
+    
+    return 
 
-def ensemblify(deggrn):
+def degs_disorders(filename:str, *disorder:str): # UNFINISHED
+    """
+    Inputs specific disorder(s) names and name of file with those disorders' merged DEGs in the following format:
+    DISORDER | STUDY | YEAR | TISSUE | GENEID | LOG2FC | PVAL
+    
+    Outputs a list of that disorder/set of disorder's DEGs
+    """
+    degs = []
+    
+    with open(filename, "r", newline="") as file:
+        reader = csv.reader(file)
+        header = next(reader)
+    
+    return degs
+
+def ensemblify(deggrn): # inputs dict containing GRN to entirely ensemblify
     for k in list(deggrn): # loops through each tf and its values
         new = utils.gene2ensembl(k)
         deggrn[new] = deggrn.pop(k) # ensemblfies all keys
         v = deggrn[new] # looks at each TF's targets
         for i, gene in enumerate(v):
-            newgene = utils.gene2ensembl(gene[0])
+            new = utils.gene2ensembl(gene[0])
+            newgene = new if new is not None else gene[0] # if input is already ensembl, replace 'None' output with original input
             v[i] = (newgene,gene[1])
     return deggrn
 

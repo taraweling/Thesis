@@ -108,20 +108,6 @@ def expand_node_attributes(adjlist:dict, genes:list): # UNFINISHED
     """
     return
 
-def degs_disorder(filename:str, *disorder:str): # UNFINISHED
-    """
-    Inputs specific disorder(s) and name of file with all disorders's DEGs in the following format:
-    DISORDER | STUDY | YEAR | TISSUE | GENEID | LOG2FC | PVAL
-    
-    Outputs a list of that disorder/set of disorder's DEGs
-    """
-    degs = []
-    
-    with open(filename, "r", newline="") as file:
-        reader = csv.reader(file)
-        header = next(reader)
-    
-    return degs
      
 def filter_adjlist(oldgraph:dict, disorder:list): # should be *disorder to take mult inputs?
     """
