@@ -25,7 +25,7 @@ def main():
     # test merge_adjlist's weight-averaging feature: AHR-A1BG SHOULD have a weight of ~0.2
     testadjlist2 = {'AHR': [('A1BG', 0.0), ('A4GALT', 0.314864), ('AHR', 0.131604), ('ALX3', 0.208409)]}
     testmerge = utils.merge_adjlist(testadjlist,testadjlist2)
-    print(testmerge,'\n')
+    #print(testmerge,'\n')
 
     # merge the two brain GRNs (also on cluster)
     #brain = utils.merge_adjlist(brainother, brainbg)
@@ -35,11 +35,19 @@ def main():
     testdisorder = ['AHR', 'ALX3']
     
     # reduce GRN to just those in disorder list
-    deggraph = utils.filter_adjlist(testmerge,testdisorder)
-    print(deggraph)
+    deggrn = utils.filter_adjlist(testmerge,testdisorder)
+  
+    # convert to ENSEMBL
+    ensemblify(deggrn)
+                
+
+    
+    print(deggrn)
+    
     ## for now, input is DEGDataSample.csv
     
     # visualize graph in new file
+    
     
     # calculate graph metrics (use an existing package?)
     
@@ -54,6 +62,17 @@ def disorder_lists(*disorder:str): # generates the concatenated list of n number
     
     
     return 
+
+
+def ensemblify(deggrn):
+    for k in list(deggrn): # loops through each tf and its values
+        new = utils.gene2ensembl(k)
+        deggrn[new] = deggrn.pop(k) # ensemblfies all keys
+        v = deggrn[new] # looks at each TF's targets
+        for i, gene in enumerate(v):
+            newgene = utils.gene2ensembl(gene[0])
+            v[i] = (newgene,gene[1])
+    return deggrn
 
 if __name__ == '__main__':
     main()

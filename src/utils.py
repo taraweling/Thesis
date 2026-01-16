@@ -9,7 +9,7 @@ ENSEMBL_REST = "https://rest.ensembl.org"
 HEADERS = {"Content-Type": "application/json"}
 
 
-def gene2ensembl(query:str | None): # used chatgpt to generate code for case 1 + debug code
+def gene2ensembl(query:str | None): # used chatgpt to generate code 
     """
     Inputs a string containing a common name for a gene OR its location
     Outputs the ensembl ID if there, otherwise does not return
@@ -101,14 +101,14 @@ def old_merge_adjlist(*oldgraph): # DOES NOT AVERAGE REPEATS, CHOOSES FIRST WEIG
     
     return newgraph
 
-def expand_node_attributes(adjlist:dict, genes:list):
+def expand_node_attributes(adjlist:dict, genes:list): # UNFINISHED
     """
     
     
     """
     return
 
-def degs_disorder(filename:str, *disorder:str):
+def degs_disorder(filename:str, *disorder:str): # UNFINISHED
     """
     Inputs specific disorder(s) and name of file with all disorders's DEGs in the following format:
     DISORDER | STUDY | YEAR | TISSUE | GENEID | LOG2FC | PVAL
@@ -119,6 +119,7 @@ def degs_disorder(filename:str, *disorder:str):
     
     with open(filename, "r", newline="") as file:
         reader = csv.reader(file)
+        header = next(reader)
     
     return degs
      
@@ -165,8 +166,15 @@ def make_adjlist(filename:str, threshold:float): # made with help from chatgpt
                     
     return adj #adjacency list of the graph
 
-def viz_graph(adjlist): # saves an html file of visualized graph
+def viz_graph(adjlist): # UNFINISHED #saves an html file of visualized graph
     
+    
+    
+    
+    return
+
+
+def kmeans(adjlist): # UNFINISHED # struggles with clusters of different densities (aka evens out size)
     
     
     
