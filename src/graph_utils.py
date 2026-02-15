@@ -11,9 +11,10 @@ ENSEMBL_REST = "https://rest.ensembl.org"
 HEADERS = {"Content-Type": "application/json"}
 
 ENSEMBL_ID_RE = re.compile(r"^ENSG\d+$")
-LOC_RE = re.compile(r"(chr)?(\w+):(\d+)-(\d+)")
+LOC_RE = re.compile(r"(chr)?(\w+):(\d+)-(\d+)") # regex
 XLOC_RE = re.compile(r"XLOC_\d+")
 
+# purpose of gene2ensembl vs ensemblify: single lookups, debugging, 
 def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion of code 
     """
     Inputs a string containing a common name for a gene OR its location
@@ -39,7 +40,7 @@ def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion
         url = f"{ENSEMBL_REST}/overlap/region/human/{chrom}:{start}-{end}"
         params = {"feature": "gene"}
 
-        r = requests.get(url, headers=HEADERS, params=params)
+        r = requests.get(url, headers=HEADERS, params=params, timeout=10)
         if not r.ok:
             return None
 
@@ -54,7 +55,7 @@ def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion
     if re.match(r"XLOC_\d+", query):
         url = f"{ENSEMBL_REST}/xrefs/symbol/homo_sapiens/{query}"
 
-        r = requests.get(url, headers=HEADERS)
+        r = requests.get(url, headers=HEADERS, timeout = 10)
         if not r.ok:
             return None
 
@@ -68,33 +69,74 @@ def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion
     # --- Case 3: Gene symbol / name ---
     url = f"{ENSEMBL_REST}/lookup/symbol/homo_sapiens/{query}"
 
-    r = requests.get(url, headers=HEADERS)
+    r = requests.get(url, headers=HEADERS, timeout=10)
     if not r.ok:
         return None
 
     data = r.json()
     return data.get("id")
+        
+def ensembl2gene(query:str | None): # bulk or not? 
+    
+    query = query.strip()
 
-def ensemblifylist(disorderlist):
-    """
-    Inputs:
-        records: list of lists in format
-            [GENEID, DISORDER, STUDY, YEAR, TISSUE, LOG2FC, PVAL]
-    Outputs:
-        same structure, but each GENEID converted to Ensembl ID if possible.
-        If conversion fails, original GENEID is retained.
-    """
-    ensemblified = []
+    # --- Case 1: Chromosomal location ---
+    loc_match = re.match(r"(chr)?(\w+):(\d+)-(\d+)", query) 
+    # Regex breakdown:
+    # (chr)?        -> optional literal "chr" prefix
+    # (\w+)         -> chromosome identifier (e.g. 1, 2, X, Y, MT)
+    # :             -> literal colon
+    # (\d+)         -> start coordinate
+    # -             -> literal dash
+    # (\d+)         -> end coordinate
+    if loc_match:
+        chrom = loc_match.group(2)
+        start = loc_match.group(3)
+        end = loc_match.group(4)
 
-    for rec in disorderlist:
-        gene = rec[0]
-        ensembl_id = gene2ensembl(gene)
-        ensembl_gene = ensembl_id if ensembl_id is not None else gene
-        new_rec = [ensembl_gene] + rec[1:]
-        ensemblified.append(new_rec)
+        url = f"{ENSEMBL_REST}/overlap/region/human/{chrom}:{start}-{end}"
+        params = {"feature": "gene"}
 
-    return ensemblified    
+        r = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        if not r.ok:
+            return None
 
+        genes = r.json()
+        if not genes:
+            return None
+
+        # Return the first overlapping gene -> does this mean the most likely match?
+        return genes[0].get("id")
+    
+    # --- Case 2: XLOC ---
+    if re.match(r"XLOC_\d+", query):
+        url = f"{ENSEMBL_REST}/xrefs/symbol/homo_sapiens/{query}"
+
+        r = requests.get(url, headers=HEADERS, timeout = 10)
+        if not r.ok:
+            return None
+
+        xrefs = r.json()
+        for x in xrefs:
+            if x.get("type") == "gene":
+                return x.get("id")
+        return None
+    # returned gene list is ordered by Ensembl’s internal logic (primarily coordinate order), not likelihood or biological relevance.
+    
+    # --- Case 3: Gene symbol / name ---
+    url = f"{ENSEMBL_REST}/lookup/symbol/homo_sapiens/{query}"
+
+    r = requests.get(url, headers=HEADERS, timeout=10)
+    if not r.ok:
+        return None
+
+    data = r.json()
+    return data.get("id")
+    
+    
+    # returns a gene ID for any ensembl sequence
+    
+    return 
 # underscores at start of fn name = internal helpers
 def _extract_gene_strings(genedict):
     """
@@ -172,10 +214,11 @@ def _resolve_special_cases(queries):
 
     return resolved
 
+# purpose of ensemblify and ensemblifylist: thousands of genes, DEGs, GRNs
 def ensemblify(genedict):
     """
-    Efficiently convert all gene identifiers in a dictionary to ENSEMBL IDs.
-    Uses one bulk POST for gene symbols, minimal individual calls for locations / XLOCs, zero calls for already-ENSEMBL IDs
+    Efficiently convert all gene names/symbols in a dictionary to ENSEMBL IDs.
+    Uses one bulk POST for gene symbols, minimal individual calls for locations / XLOCs, zero calls if the gene is already an ENSEMBL IDs
     """
 
     # 1. collect all candidate gene strings
@@ -209,6 +252,60 @@ def ensemblify(genedict):
             newdict[new_k] = v
 
     return newdict
+
+def ensemblifylist(disorderlist):
+    """
+    Inputs:
+        records: list of lists in format
+            [GENEID, DISORDER, STUDY, YEAR, TISSUE, LOG2FC, PVAL]
+    Outputs:
+        same structure, but each GENEID converted to Ensembl ID if possible.
+        If conversion fails, original GENEID is retained.
+        
+    Does so in bulk using helper functions
+    """
+    genes = {rec[0] for rec in disorderlist} # collect unique genes
+    
+    # partition by type of gene ID
+    ensg = {g for g in genes if ENSEMBL_ID_RE.match(g)}
+    locs = {g for g in genes if LOC_RE.match(g)}
+    xlocs = {g for g in genes if XLOC_RE.match(g)}
+    symbols = genes - ensg - locs - xlocs
+    
+    # make names consistent
+    mapping = {}
+
+    # already ENSG
+    mapping.update({g: g for g in ensg})
+
+    # bulk symbol -> ENSG
+    if symbols:
+        mapping.update(_bulk_symbol_lookup(symbols))
+
+    # individual chrom coords or XLOC
+    if locs or xlocs:
+        mapping.update(_resolve_special_cases(locs | xlocs))
+        
+    """ensemblified = []
+
+    for rec in disorderlist:
+        gene = rec[0]
+        ensembl_id = gene2ensembl(gene)
+        ensembl_gene = ensembl_id if ensembl_id is not None else gene
+        new_rec = [ensembl_gene] + rec[1:]
+        ensemblified.append(new_rec)
+
+    return ensemblified"""
+    
+    # rebuild list of DEGs
+    out = []
+
+    for rec in disorderlist:
+        gene = rec[0] # extracts 1st column = gene identifier
+        out.append([mapping.get(gene, gene), *rec[1:]]) # references gene in mapping dict
+        #if found, returns new val otherwise returns original gene. also skips first column
+
+    return out
 
 def oldensemblify(deggrn): # inputs dict containing GRN to entirely ensemblify all genes. SPEED UP VIA BULK CALL - am i making unecessary calls? 
     for k in list(deggrn): # loops through each tf and its values
@@ -423,9 +520,10 @@ def disorder_list(filename:str, *disorder:str): # generates the joined list of l
 
     return records
 
-def deg_grn_tfsonly(grn,disorderlist): 
+def deg_grn_tfsonly(grn,disorderlist): # aka enrich GRN with DEG info
     """
-    Merge information from the GRN adjacency list (dict) and disorders list of lists such that the resulting dictionary looks as follows: 
+    Merge information from the GRN adjacency list (dict containing gene and GRN edge weight) 
+    and disorders list of lists such that the resulting dictionary looks as follows: 
     {TF1:[(Gene1, GRNedgeweight1, disorder1, study1, year1, tissue1, log2fc1, pval1), 
     (Gene2, GRNedgeweight2, disorder2, study2, year2, tissue2, log2fc2, pval2)], TF2:[(etc)]}
     
@@ -468,12 +566,15 @@ def deg_grn_tfsonly(grn,disorderlist):
 
 def deg_grn_both(grn, disorderlist):
 
+    # Build gene → list of disorder metadata
     gene_to_disorders = {}
 
     for rec in disorderlist:
-        gene_to_disorders.setdefault(rec[0], []).append(tuple(rec[1:]))
+        gene_id = rec[0]
+        info = tuple(rec[1:])  # (disorder, study, year, tissue, log2fc, pval)
+        gene_to_disorders.setdefault(gene_id, []).append(info)
 
-    degset = set(gene_to_disorders)
+    degset = set(gene_to_disorders.keys())
 
     finalgrn = {}
 
@@ -484,13 +585,12 @@ def deg_grn_both(grn, disorderlist):
 
         merged = []
 
-        for edge in targets:
-            gene = edge[0]
-            weight = edge[1]
+        for gene, weight in targets:
 
-            if gene not in gene_to_disorders:
+            if gene not in degset:
                 continue
 
+            # attach ALL disorder rows for this gene
             for disorder_info in gene_to_disorders[gene]:
                 merged.append((gene, weight) + disorder_info)
 
@@ -498,7 +598,6 @@ def deg_grn_both(grn, disorderlist):
             finalgrn[tf] = merged
 
     return finalgrn
-
 
 def expand_node_attributes(adjlist:dict, genes:list): # UNFINISHED
     """

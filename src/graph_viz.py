@@ -6,17 +6,20 @@ import graph_algos as ga
 import graph_utils as gu
 import json
 import py4cytoscape as pyc
+import math
 
 # All functions now assume edgelist rows look like:
 # [TF, Gene, weight] OR
 # [TF, Gene, weight, disorder, study, year, tissue, log2fc, pval]
 
-
 # Visualize
 ## MUST FIGURE OUT A WAY TO VISUALIZE ONLY THE GENES THAT THE MOST TFS POINT TO 
-from pyvis.network import Network
 
-def lastditch(adjlist, outfile="grn.html", directed=True):
+#  returns graph of the most differentally expressed TFs 
+def regulon_viz(adjlist, outfile ="regulon.html"): 
+    return
+    
+def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make not directed so it resembles a co-expression net
     """
     Visualize a Gene Regulatory Network (GRN) stored as an adjacency list.
 
@@ -48,9 +51,7 @@ def lastditch(adjlist, outfile="grn.html", directed=True):
 
     G = Network(directed=directed)
 
-    # ------------------------------------------------------------------
     # Collect node metadata
-    # ------------------------------------------------------------------
 
     node_info = {}
 
@@ -70,11 +71,7 @@ def lastditch(adjlist, outfile="grn.html", directed=True):
                 "pval": pval
             })
 
-    # ------------------------------------------------------------------
-    # Add nodes
-    # ------------------------------------------------------------------
-
-    import math
+    # Add nodes    
 
     for node, info in node_info.items():
 
@@ -83,7 +80,7 @@ def lastditch(adjlist, outfile="grn.html", directed=True):
         # size from p-value
         size = 20
         if info.get("pval") is not None and info["pval"] > 0:
-            size = min(60, 10 + (-math.log10(info["pval"]) * 6))
+            size = min(60, 10 + (-math.log10(info["pval"]) * 6)) # what does this do
 
         # color from log2fc
         color = "#cccccc"
@@ -101,9 +98,7 @@ def lastditch(adjlist, outfile="grn.html", directed=True):
             color=color,
         )
 
-    # ------------------------------------------------------------------
     # Add edges
-    # ------------------------------------------------------------------
 
     for tf, targets in adjlist.items():
         for edge in targets:
@@ -111,32 +106,30 @@ def lastditch(adjlist, outfile="grn.html", directed=True):
             weight = abs(edge[1]) if len(edge) > 1 else 1.0
             G.add_edge(tf, gene, value=weight)
 
-    # ------------------------------------------------------------------
     # Write output
-    # ------------------------------------------------------------------
 
     G.toggle_physics(True)
     G.show_buttons(filter_=["physics"])
     G.write_html(outfile)
+    return 
 
-
-def visualize_deg_grn(adjlist, min_weight=None, max_pval=None, min_abs_log2fc=None, max_edges=1000, seed=0):
+def visualize_deg_grn(adjlist, min_pval=None, min_abs_log2fc=None, max_abs_log2fc=None, max_edges=1000, seed=0):
     """
     Visualize a DEG-GRN adjacency list.
 
     adjlist format:
     {
         TF: [
-            (Gene, GRN_weight, disorder, study, year, tissue, log2fc, pval),
+            (Gene, disorder, study, year, tissue, log2fc, pval),
             ...
         ]
     }
 
     Filters:
-        min_weight      → drop weak GRN edges
-        max_pval        → drop nonsignificant DEGs
-        min_abs_log2fc  → drop weak expression changes
-        max_edges       → subsample edges if still huge
+        min_weight      = drop weak GRN edges
+        max_pval        = drop nonsignificant DEGs
+        min_abs_log2fc  = drop weak expression changes
+        max_edges       = take random edges if still huge
     """
 
     G = nx.DiGraph()
@@ -144,43 +137,44 @@ def visualize_deg_grn(adjlist, min_weight=None, max_pval=None, min_abs_log2fc=No
     # Build graph with filters
 
     for tf, edges in adjlist.items():
-        for gene, w, dis, study, year, tissue, lfc, pval in edges:
+        #print(list(edges)[:10])
+        #for gene, dis, study, year, tissue, lfc, pval in edges:
+        for gene in edges:
+        #for gene, w, dis, study, year, tissue, lfc, pval in edges:     
+            # if min_pval is not None and pval > min_pval:
+            #     continue
 
-            if min_weight is not None and abs(w) < min_weight:
-                continue
-
-            if max_pval is not None and pval > max_pval:
-                continue
-
-            if min_abs_log2fc is not None and abs(lfc) < min_abs_log2fc:
-                continue
+            #     continue
+            
+            # if max_abs_log2fc is not None and lfc > max_abs_log2fc:
+            #     continue
 
             G.add_edge(
                 tf,
                 gene,
-                weight=w,
-                disorder=dis,
-                study=study,
-                year=year,
-                tissue=tissue,
-                log2fc=lfc,
-                pval=pval,
+                #weight=w,
+                # disorder=dis,
+                # study=study,
+                # year=year,
+                # tissue=tissue,
+                # log2fc=lfc,
+                # pval=pval,
             )
 
     # Downsample if enormous
 
     if G.number_of_edges() > max_edges:
-        import random
-        random.seed(seed)
+         import random
+         random.seed(seed)
 
-        edges = list(G.edges(data=True))
-        keep = random.sample(edges, max_edges)
+         edges = list(G.edges(data=True))
+         keep = random.sample(edges, max_edges)
 
-        G2 = nx.DiGraph()
-        for u, v, d in keep:
-            G2.add_edge(u, v, **d)
+         G2 = nx.DiGraph()
+         for u, v, d in keep:
+             G2.add_edge(u, v, **d)
 
-        G = G2
+         G = G2
 
     # Layout
 
@@ -192,15 +186,14 @@ def visualize_deg_grn(adjlist, min_weight=None, max_pval=None, min_abs_log2fc=No
     gene_nodes = [n for n in G.nodes if n not in tfs]
 
     # Draw
-
-    plt.figure(figsize=(14, 12))
+    plt.figure(figsize=(24, 22))
 
     nx.draw_networkx_nodes(
         G,
         pos,
         nodelist=tf_nodes,
-        node_color="firebrick",
-        node_size=800,
+        node_shape="^",
+        node_size=200,
         label="TFs",
     )
 
@@ -208,8 +201,8 @@ def visualize_deg_grn(adjlist, min_weight=None, max_pval=None, min_abs_log2fc=No
         G,
         pos,
         nodelist=gene_nodes,
-        node_color="steelblue",
-        node_size=400,
+        node_shape="o",
+        node_size=200,
         label="Targets",
     )
 
@@ -221,17 +214,18 @@ def visualize_deg_grn(adjlist, min_weight=None, max_pval=None, min_abs_log2fc=No
         width=1,
     )
 
-    nx.draw_networkx_labels(G, pos, font_size=7)
+    #nx.draw_networkx_labels(G, pos, font_size=4)
 
     plt.title(
-        f"DEG–GRN network\nNodes={G.number_of_nodes()}  Edges={G.number_of_edges()}"
+        f"DEG–GRN network\nNodes={G.number_of_nodes()} Edges={G.number_of_edges()}"
     )
 
     #plt.legend()
     plt.axis("off")
     plt.tight_layout()
-    plt.savefig('results/deggrn.jpeg')
+    plt.savefig('results/grn.png')
     plt.show()
+    return
 
 def viz_graph(edgelist, outfile): # constructed using anna ritz's course assignment as inspiration
     """

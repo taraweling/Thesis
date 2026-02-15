@@ -4,13 +4,74 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 
-def kmeans(adjlist): # UNFINISHED # struggles with clusters of different densities (aka evens out size)
+def sign_summary(adjlist):
+    
+    """
+    Input:
+        DEG-GRN adjacency list:
+        {TF: [(Gene, weight, disorder, study, year, tissue, log2fc, pval), ...]}
+
+    Output:
+        dict containing sign counts for:
+            - DEGs (targets)
+            - DETFs (TF nodes)
+    """
+    
+    deg_sign = {}      # gene -> sign
+    detf_sign = {}     # tf -> sign
+
+    for tf, edges in adjlist.items():
+
+        tf_signs = []
+
+        for edge in edges:
+            gene = edge[0]
+            log2fc = edge[6]
+
+            sign = "positive" if log2fc > 0 else "negative" if log2fc < 0 else "zero"
+
+            deg_sign[gene] = sign
+            tf_signs.append(sign)
+
+        # TF sign: majority rule across its edges
+        if tf_signs:
+            pos = tf_signs.count("positive")
+            neg = tf_signs.count("negative")
+
+            if pos > neg:
+                detf_sign[tf] = "positive"
+            elif neg > pos:
+                detf_sign[tf] = "negative"
+            else:
+                detf_sign[tf] = "zero"
+
+    summary = {
+        "DEGs_total": len(deg_sign),
+        "DEGs_positive": sum(1 for s in deg_sign.values() if s == "positive"),
+        "DEGs_negative": sum(1 for s in deg_sign.values() if s == "negative"),
+        "DETFs_total": len(detf_sign),
+        "DETFs_positive": sum(1 for s in detf_sign.values() if s == "positive"),
+        "DETFs_negative": sum(1 for s in detf_sign.values() if s == "negative"),
+    }
+
+    return summary
+
+def kmeans(adjlist): # struggles with clusters of different densities (aka evens out size)
     
     
     
     return
 
 def calculate_clustering_coeff(adjlist): # input = adjlist like the one from A
+    
+    """
+    Input:
+    
+    
+    
+    Output:
+    
+    """
     # output = dict of (node:str, clustering_coeff:float)
     C = {}
     clustering_coeff = 0

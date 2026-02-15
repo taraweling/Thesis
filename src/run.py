@@ -8,6 +8,7 @@ import graph_algos as ga
 import json
 import py4cytoscape as pyc
 import pandas as pd
+import time # start = time.time(); multi_time = time.time() - start; print(f"Multi-threaded:  {multi_time:.3f}s")
 
 # INSTRUCTIONS: RUN WHILE IN SRC FOLDER
 def main():
@@ -33,9 +34,7 @@ def main():
     #testmerge = utils.merge_adjlist(testadjlist,testadjlist2)
     #print(testmerge,'\n')
 
-    # merge the two brain GRNs (also on cluster)
-    #brainother = gu.ensemblify(brainother)
-    #brainbg = gu.ensemblify(brainbg)
+    # merge the two brain GRNs 
     brains= gu.merge_adjlist(brainother, brainbg)
     grn = gu.ensemblify(brains)
     
@@ -43,33 +42,40 @@ def main():
     first_node = next(iter(brains))
     print("non ensemble",first_node)"""
 
-    # should I do a bunch of stats calls on the merged brain grn to compare?
+    # should I do a bunch of stats calls on the merged brain grn to compare to individual?
     
-    
-    # get adjlists per disorder by inputting the name of the disorder CURRENTLY ENSEMBLIFY IS TAKING TOO LONG
+    # get adjlists per disorder by inputting the name of the disorder
     ## (options = AD, ADHD, BD, SZ, MDD, OCD) and the file location, outputting a list of lists   
-    test = gu.disorder_list('data/DEGDataSample.csv','BD','SZ')
-    
-    # lambda function that creates a list from the keys in the disorders dict?
-    
+    test = gu.disorder_list('data/DEGDataSample.csv','BD')
+
     # convert geneIDs in disorders list of lists to ENSEMBL IDs
     degs = gu.ensemblifylist(test)
-    
+
     # reduce GRN to just keys from disorders 
     #deggrn = gu.filter_adjlist(brain,disorders)
-    
-    # merge list of lists with brain grn, cutting the grn down to just the keys in disorders
-    print(len(grn),len(degs))
-    degset = {row[4] for row in degs} # location of DEG col
-
-    print("brain keys:", list(grn)[:1000])
-    print("degset:", list(degset)[:10])
+    #print(len(grn),len(grn.items))
+    print("brain keys:", list(grn)[:10])
+    degset = {row[0] for row in degs} # location of DEG col in input chart
+    print("deg:", list(degset)[:10])
     print("overlap:", len(set(grn) & degset))
 
+    # merge list of lists with brain grn, cutting the grn down to just the keys in disorders
+    # do I care what DEGs aren't in the GRN? 
     deggrn = gu.deg_grn_tfsonly(grn,degs)
     print("size of deg-grn: ", len(deggrn))
+    for tf, edges in deggrn.items():
+        for e in edges[:5]:
+            print(len(e))
+        break
+
     # run stats from graph_algos here!
+    print("deg-grn keys:", list(deggrn)[:10])
+    # check number of positive vs negative DETFs?
     
+    # location of sign (up or downregulation) col in input chart
+            
+        
+    #print(len(pos),'\t',len(neg))
     """G = nx.from_dict_of_lists(
     {k: [x[0] for x in v] for k, v in deggrn.items()},
     create_using=nx.DiGraph())"""
@@ -80,15 +86,14 @@ def main():
     deggrnedgelist = gu.adjlist2edgelist(deggrn)
     
     # visualize graph in new file
-    gv.viz_graph(deggrnedgelist,'results/disorder.html')
-    gv.visualize_deg_grn(gu.deg_grn_both(grn,degs))
-    #gv.lastditch(deggrn)
+    #gv.viz_graph(deggrnedgelist,'results/deggrn.html')
+    #gv.visualize_deg_grn(deggrn)
+    #gv.pyviz_deggrn(deggrn)
     ## later on, add variable that tracks the names of the disorders being indexed so I can create a file with that name
                       
     # calculate graph metrics (use an existing package?)
     
     return 
-
 
 if __name__ == '__main__':
     main()
