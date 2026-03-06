@@ -35,7 +35,7 @@ def main():
     #print(testmerge,'\n')
 
     # merge the two brain GRNs 
-    brains= gu.merge_adjlist(brainother, brainbg)
+    brains= gu.merge_adjlist(brainother, brainbg) # NOT WORKING 
     grn = gu.ensemblify(brains)
     
     """Get the first key
@@ -50,31 +50,47 @@ def main():
 
     # convert geneIDs in disorders list of lists to ENSEMBL IDs
     degs = gu.ensemblifylist(test)
+    
 
-    # reduce GRN to just keys from disorders 
+    # reduce GRN to just keys from disorders (REPLACED WITH DEG_GRN_BOTH VS DEG_GRN_TFS_ONLY)
     #deggrn = gu.filter_adjlist(brain,disorders)
     #print(len(grn),len(grn.items))
-    print("brain keys:", list(grn)[:10])
+    
+    #print("brain first 10 keys:", list(grn)[:10])
     degset = {row[0] for row in degs} # location of DEG col in input chart
-    print("deg:", list(degset)[:10])
+    #print("deg first 10 keys:", list(degset)[:10])
     print("overlap:", len(set(grn) & degset))
 
     # merge list of lists with brain grn, cutting the grn down to just the keys in disorders
     # do I care what DEGs aren't in the GRN? 
-    deggrn = gu.deg_grn_tfsonly(grn,degs)
-    print("size of deg-grn: ", len(deggrn))
-    for tf, edges in deggrn.items():
+    deggrn = gu.deg_grn_both(grn,degs) # produces grn of differential tfs AND differential gene targets
+    tfgrn = gu.deg_grn_tfsonly(grn,degs) # produces grn of differential tfs only
+    
+    print("size of deg-grn: ", len(deggrn)) # graph this somehow comparing all of the above?
+    print("size of tf-grn: ", len(tfgrn)) 
+    
+    """for tf, edges in deggrn.items(): 
         for e in edges[:5]:
             print(len(e))
         break
-
-    # run stats from graph_algos here!
     print("deg-grn keys:", list(deggrn)[:10])
-    # check number of positive vs negative DETFs?
+    """
     
-    # location of sign (up or downregulation) col in input chart
-            
-        
+    # run stats from graph_algos here!
+    
+    # check number of positive vs negative DETFs
+    ga.edgeweight_summary(brains)
+    ga.edgeweight_summary(grn)
+    ga.edgeweight_summary(brainother)
+    ga.edgeweight_summary(brainbg)
+    ga.edgeweight_summary(deggrn)
+    ga.edgeweight_summary(tfgrn)
+    
+    ga.log2fc_summary(deggrn)
+    ga.log2fc_summary(tfgrn)
+    
+    
+    # location of sign (up or downregulation) col in input chart?
     #print(len(pos),'\t',len(neg))
     """G = nx.from_dict_of_lists(
     {k: [x[0] for x in v] for k, v in deggrn.items()},
@@ -86,9 +102,10 @@ def main():
     deggrnedgelist = gu.adjlist2edgelist(deggrn)
     
     # visualize graph in new file
-    #gv.viz_graph(deggrnedgelist,'results/deggrn.html')
-    #gv.visualize_deg_grn(deggrn)
-    #gv.pyviz_deggrn(deggrn)
+    gv.viz_graph(deggrnedgelist,'results/deggrn.html')
+    gv.visualize_deg_grn(deggrn)
+    gv.pyviz_deggrn(deggrn)
+    
     ## later on, add variable that tracks the names of the disorders being indexed so I can create a file with that name
                       
     # calculate graph metrics (use an existing package?)

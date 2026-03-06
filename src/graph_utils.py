@@ -76,62 +76,7 @@ def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion
     data = r.json()
     return data.get("id")
         
-def ensembl2gene(query:str | None): # bulk or not? 
-    
-    query = query.strip()
-
-    # --- Case 1: Chromosomal location ---
-    loc_match = re.match(r"(chr)?(\w+):(\d+)-(\d+)", query) 
-    # Regex breakdown:
-    # (chr)?        -> optional literal "chr" prefix
-    # (\w+)         -> chromosome identifier (e.g. 1, 2, X, Y, MT)
-    # :             -> literal colon
-    # (\d+)         -> start coordinate
-    # -             -> literal dash
-    # (\d+)         -> end coordinate
-    if loc_match:
-        chrom = loc_match.group(2)
-        start = loc_match.group(3)
-        end = loc_match.group(4)
-
-        url = f"{ENSEMBL_REST}/overlap/region/human/{chrom}:{start}-{end}"
-        params = {"feature": "gene"}
-
-        r = requests.get(url, headers=HEADERS, params=params, timeout=10)
-        if not r.ok:
-            return None
-
-        genes = r.json()
-        if not genes:
-            return None
-
-        # Return the first overlapping gene -> does this mean the most likely match?
-        return genes[0].get("id")
-    
-    # --- Case 2: XLOC ---
-    if re.match(r"XLOC_\d+", query):
-        url = f"{ENSEMBL_REST}/xrefs/symbol/homo_sapiens/{query}"
-
-        r = requests.get(url, headers=HEADERS, timeout = 10)
-        if not r.ok:
-            return None
-
-        xrefs = r.json()
-        for x in xrefs:
-            if x.get("type") == "gene":
-                return x.get("id")
-        return None
-    # returned gene list is ordered by Ensembl’s internal logic (primarily coordinate order), not likelihood or biological relevance.
-    
-    # --- Case 3: Gene symbol / name ---
-    url = f"{ENSEMBL_REST}/lookup/symbol/homo_sapiens/{query}"
-
-    r = requests.get(url, headers=HEADERS, timeout=10)
-    if not r.ok:
-        return None
-
-    data = r.json()
-    return data.get("id")
+def ensembl2gene(query:str | None): # bulk or not? needed for turning results into common names before 
     
     
     # returns a gene ID for any ensembl sequence
@@ -566,7 +511,7 @@ def deg_grn_tfsonly(grn,disorderlist): # aka enrich GRN with DEG info
 
 def deg_grn_both(grn, disorderlist):
 
-    # Build gene → list of disorder metadata
+    # Build gene from list of disorder metadata
     gene_to_disorders = {}
 
     for rec in disorderlist:

@@ -3,13 +3,58 @@ from pyvis.network import Network as net
 import networkx as nx
 import matplotlib.pyplot as plt
 
+def edgeweight_summary(adjlist,*condition:None): #works for any grn 
+    """
+    Input:
+        Any adjacency list structured as:
+            {TF: (gene1, regweight1), (gene2, regweight2)]}
+    
+    Output:
+        printable dict containing average edge weight counts for:
+            - DETFs (TF nodes)
+            - DEGs (targets)
+            - DEXs (both tfs and gene targets)
+            
+    """
+    tf_avg = [] # tf avgs
+    g_avg = []
+    degs_avg = [] # list of all DEG weights 
+    detfs_avg = []
+    
+    for tf, edges in adjlist.items():
+        
+        for edge in edges: # loops through each gene
+            weight = edge[1]
+            if len(edges) > 2:
+                degs_avg.append(weight)
+            else:
+                g_avg.append(weight) # 
+        tf_avg.append(sum(degs_avg) / len(degs_avg)) # adds average deg per tf
+        
+        
+    summary = { 
+        "DEGs_average":  sum(degs_avg) / len(degs_avg), # averages all degs
+        "TFs_avg": sum(tf_avg) / len(tf_avg), # average TF
+        "DETFs_avg": sum(),
+        "G_avg": sum(g_avg) / len(g_avg)
+        }
+    
+    print(summary) # remove later 
+    return summary
 
-def sign_summary(adjlist):
+# what about a function to look at differential TFs and the genes they regulate? 
+# would require 
+
+def log2fc_summary(adjlist): # only applies to degs = whatever has 7 values 
+    #per tf (which does not have to be differentially regulated)
     
     """
     Input:
-        DEG-GRN adjacency list:
-        {TF: [(Gene, weight, disorder, study, year, tissue, log2fc, pval), ...]}
+        DEG-GRN adjacency list structured as :
+            {TF: (DEG1, etc), (DEG2, etc)]}
+            
+        Figure out later if I should cut TFs down to DETF...
+            {TF: (geneID, edgeweight, disorder, study, year, tissue, log2fc, pval)}
 
     Output:
         dict containing sign counts for:
@@ -17,24 +62,35 @@ def sign_summary(adjlist):
             - DETFs (TF nodes)
     """
     
-    deg_sign = {}      # gene -> sign
-    detf_sign = {}     # tf -> sign
+    deg_sign = {}   # gene -> sign
+    detf_sign = {}  # tf -> sign (relies on tf_signs within loop)
+    tf_avg = []  # collects the avg reg weights of TFs that regulates a DEG 
+    deg_avg = [] # collects the reg weights of DEGs
+    # as calculated by averaging all its DEG target's log2fc   
+    
+    for tf, edges in adjlist.items(): # avgs might not work
 
-    for tf, edges in adjlist.items():
-
-        tf_signs = []
-
-        for edge in edges:
-            gene = edge[0]
-            log2fc = edge[6]
-
-            sign = "positive" if log2fc > 0 else "negative" if log2fc < 0 else "zero"
-
-            deg_sign[gene] = sign
-            tf_signs.append(sign)
-
-        # TF sign: majority rule across its edges
-        if tf_signs:
+        tf_signs = [] # collects all tf's pos or neg regulation per deg
+        tf_weight = []
+        for edge in edges: # loops through each gene
+            
+            if len(edge) > 2: # if differential gene, then length > 2
+                weight = edge[6] # log2fc col
+                gene = edge[0] # ensembl id col
+                sign = ''
+                if weight > 0.0:
+                    sign = "positive"
+                else:
+                    sign = "negative"
+                
+                deg_sign[gene] = sign # key = DEG, value = sign
+                tf_signs.append(sign) # adds sign to list of tf reg
+                deg_avg.append(weight) 
+    
+        tf_avg += sum(deg_avg) / len(deg_avg) # averages all deg weights per tf
+        
+        if tf_signs: # tf differential values are obtained by comparing counts 
+  
             pos = tf_signs.count("positive")
             neg = tf_signs.count("negative")
 
@@ -45,15 +101,20 @@ def sign_summary(adjlist):
             else:
                 detf_sign[tf] = "zero"
 
-    summary = {
+    summary = { 
         "DEGs_total": len(deg_sign),
+        "DEGs_average":  sum(deg_avg) / len(deg_avg), # averages all degs
         "DEGs_positive": sum(1 for s in deg_sign.values() if s == "positive"),
         "DEGs_negative": sum(1 for s in deg_sign.values() if s == "negative"),
-        "DETFs_total": len(detf_sign),
-        "DETFs_positive": sum(1 for s in detf_sign.values() if s == "positive"),
-        "DETFs_negative": sum(1 for s in detf_sign.values() if s == "negative"),
-    }
+        
+        # Below are regular TFS THAT REGULATE A DEG (so maybe special tfs)
+        "TFs_total": len(detf_sign),
+        "TFs_avg": sum(tf_avg) / len(tf_avg), # average TF
+        "TFs_positive": sum(1 for s in detf_sign.values() if s == "positive"),
+        "TFs_negative": sum(1 for s in detf_sign.values() if s == "negative"),
+        }
 
+    print(summary) # remove later
     return summary
 
 def kmeans(adjlist): # struggles with clusters of different densities (aka evens out size)
@@ -66,13 +127,11 @@ def calculate_clustering_coeff(adjlist): # input = adjlist like the one from A
     
     """
     Input:
+
     
-    
-    
-    Output:
+    Output:  dict of (node:str, clustering_coeff:float)
     
     """
-    # output = dict of (node:str, clustering_coeff:float)
     C = {}
     clustering_coeff = 0
         
