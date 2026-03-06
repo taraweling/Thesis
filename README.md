@@ -5,4 +5,3 @@ I subsequently cross-reference DEGs for various disorders to TFs in the GRN to p
 
 Code is included in src. The main function is in run.py, which calls other functions in that file, while helper functions that are used repeatedly are in utils.py.
 
-Since the processes rely on resource-intensive, time-consuming loops, they are optimally run on computing nodes with the settings found in ther sbatch files.
