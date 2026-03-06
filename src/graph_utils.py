@@ -432,7 +432,7 @@ def make_adjlist(filename:str, threshold:float):
                     
     return adj #adjacency list of the graph
 
-def disorder_list(filename:str, *disorder:str): # generates the joined list of list of n number of disorders, fixed using chatgpt
+def disorder_list(filename:str, *disorder:str): # generates the concatenated list of list of n number of disorders, fixed using chatgpt
     """
     Inputs specific disorder(s) names and the name of csv file storing all disorders' DEGs in the following format:
     DISORDER | STUDY | YEAR | TISSUE | GENEID | LOG2FC | PVAL
@@ -465,7 +465,7 @@ def disorder_list(filename:str, *disorder:str): # generates the joined list of l
 
     return records
 
-def deg_grn_tfsonly(grn,disorderlist): # aka enrich GRN with DEG info
+def de_grn_tfsonly(grn,disorderlist): # aka enrich GRN with DEG info
     """
     Merge information from the GRN adjacency list (dict containing gene and GRN edge weight) 
     and disorders list of lists such that the resulting dictionary looks as follows: 
@@ -478,38 +478,41 @@ def deg_grn_tfsonly(grn,disorderlist): # aka enrich GRN with DEG info
     
     """
     gene_to_disorders = {}
+
     for rec in disorderlist:
         gene_id = rec[0]
-        info = tuple(rec[1:])  # (DISORDER, STUDY, YEAR, TISSUE, LOG2FC, PVAL)
+        info = tuple(rec[1:])
         gene_to_disorders.setdefault(gene_id, []).append(info)
 
-    disorder_genes = set(gene_to_disorders.keys())
+    degset = set(gene_to_disorders.keys())
 
     finalgrn = {}
 
     for tf, targets in grn.items():
 
-        # ONLY restrict by TF presence in disorderlist
-        if tf not in disorder_genes:
+        if tf not in degset:
             continue
 
         merged = []
 
         for gene, weight in targets:
 
-            # If gene has disorder info, attach all of it
-            if gene in gene_to_disorders:
-                for disorder_info in gene_to_disorders[gene]:
-                    merged.append((gene, weight) + disorder_info)
+            if gene not in degset:
+                continue
 
-            # Otherwise keep gene + weight only
-            else:
-                merged.append((gene, weight))
+            for disorder_info in gene_to_disorders[gene]:
+                merged.append((gene, weight) + disorder_info)
 
-        finalgrn[tf] = merged
+        if merged:
+            finalgrn[tf] = merged
+
     return finalgrn
 
-def deg_grn_both(grn, disorderlist):
+def de_grn_both(grn, disorderlist):
+    
+    """
+    
+    """
 
     # Build gene from list of disorder metadata
     gene_to_disorders = {}
@@ -536,6 +539,50 @@ def deg_grn_both(grn, disorderlist):
                 continue
 
             # attach ALL disorder rows for this gene
+            for disorder_info in gene_to_disorders[gene]:
+                merged.append((gene, weight) + disorder_info)
+
+        if merged:
+            finalgrn[tf] = merged
+
+    return finalgrn
+
+def de_grn_degsonly(grn, disorderlist):
+
+    """
+    Identify regulatory edges where: TF is NOT a DEG but target gene IS a DEG
+
+    Output format: {TF:[(Gene, GRNedgeweight, disorder, study, year, tissue, log2fc, pval), ...]}
+
+    """
+
+    # Build gene -to disorder "metadata" dictionary
+    gene_to_disorders = {}
+
+    for rec in disorderlist:
+        gene_id = rec[0]
+        info = tuple(rec[1:])
+        gene_to_disorders.setdefault(gene_id, []).append(info)
+
+    degset = set(gene_to_disorders.keys())
+
+    finalgrn = {}
+
+    for tf, targets in grn.items():
+
+        # Skip TFs that ARE DEGs
+        if tf in degset:
+            continue
+
+        merged = []
+
+        for gene, weight in targets:
+
+            # Only keep targets that ARE DEGs
+            if gene not in degset:
+                continue
+
+            # Attach all disorder metadata rows
             for disorder_info in gene_to_disorders[gene]:
                 merged.append((gene, weight) + disorder_info)
 

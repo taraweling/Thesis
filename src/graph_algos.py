@@ -3,6 +3,71 @@ from pyvis.network import Network as net
 import networkx as nx
 import matplotlib.pyplot as plt
 
+# use below fn on deg_grn_tfsonly: 
+def regulator_detection(grn, disorderlist):
+
+    """
+    Identify TFs whose high-weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA network.
+
+    Driver score per TF: sum(weight * abs(log2fc_target))
+    = estimates how strongly a transcription factor's regulatory edges align with observed expression changes.
+
+    Output:
+    {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
+    """
+    
+    # Build gene: disorder metadata dictionary
+    gene_to_disorders = {}
+
+    for rec in disorderlist:
+        gene_id = rec[0]
+        info = tuple(rec[1:])
+        gene_to_disorders.setdefault(gene_id, []).append(info)
+
+    degset = set(gene_to_disorders.keys())
+
+    tf_results = []
+
+    for tf, targets in grn.items():
+
+        score = 0
+        deg_targets = 0
+        total_targets = 0
+        log2fcs = []
+
+        for gene, weight in targets:
+
+            total_targets += 1
+
+            if gene not in degset:
+                continue
+
+            for disorder_info in gene_to_disorders[gene]:
+                log2fc = disorder_info[4]
+                score += weight * abs(log2fc)
+                log2fcs.append(log2fc)
+                deg_targets += 1
+
+        if deg_targets == 0:
+            continue
+
+        mean_fc = sum(log2fcs) / len(log2fcs)
+        
+        normalized_score = score / total_targets 
+        
+        tf_results.append({
+            "TF": tf,
+            "targets": total_targets,
+            "deg_targets": deg_targets,
+            "driver_score": score, # = total regulatory influence
+            "normalized_score": normalized_score, # # = average influence per target
+            "mean_target_log2fc": mean_fc})
+    
+        tf_results.sort(key=lambda x: x["driver_score"], reverse=True)
+
+    return tf_results
+
+
 def edgeweight_summary(adjlist,*condition:None): #works for any grn 
     """
     Input:
@@ -29,9 +94,10 @@ def edgeweight_summary(adjlist,*condition:None): #works for any grn
                 degs_avg.append(weight)
             else:
                 g_avg.append(weight) # 
+                
         tf_avg.append(sum(degs_avg) / len(degs_avg)) # adds average deg per tf
         
-        
+        if 
     summary = { 
         "DEGs_average":  sum(degs_avg) / len(degs_avg), # averages all degs
         "TFs_avg": sum(tf_avg) / len(tf_avg), # average TF
