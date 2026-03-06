@@ -3,17 +3,65 @@ from pyvis.network import Network as net
 import networkx as nx
 import matplotlib.pyplot as plt
 
-# use below fn on deg_grn_tfsonly: 
-def regulator_detection(grn, disorderlist):
+# use below fns on deg_grn_both to return tf_scores
+def regulatory_scores(deg_grn):
 
     """
-    Identify TFs whose high-weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA network.
+    Calculate TF regulatory driver scores using PANDA edge weights
+    and DEG log2FC values.
+
+    driver_score = sum(weight * abs(log2fc))
+    """
+
+    tf_scores = []
+
+    for tf, edges in deg_grn.items():
+
+        score = 0
+        targets = set()
+        log2fcs = []
+
+        for rec in edges:
+            gene = rec[0]
+            weight = rec[1]
+            log2fc = rec[6]
+
+            targets.add(gene)
+            log2fcs.append(log2fc)
+
+            score += weight * abs(log2fc)
+
+        if not log2fcs:
+            continue
+
+        mean_fc = sum(log2fcs) / len(log2fcs)
+
+        tf_scores.append({
+            "TF": tf,
+            "targets": len(targets),
+            "edges": len(edges),
+            "mean_log2fc": mean_fc,
+            "driver_score": score})
+
+    # sort a list of dictionaries by the value stored under "driver_score".
+    tf_scores.sort(key=lambda x: x["driver_score"],reverse=True) 
+    # TF with the largest driver score appears first.
+    
+    return tf_scores
+
+###################
+# use below fns on deg_grn_tfsonly. loses information on sign of regulation.
+
+def regulator_detection(grn, disorderlist): # outputs tf_results
+
+    """
+    Identify TFs whose high-weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
 
     Driver score per TF: sum(weight * abs(log2fc_target))
     = estimates how strongly a transcription factor's regulatory edges align with observed expression changes.
-
-    Output:
-    {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
+    aka total regulatory influence of a TF over the disease transcriptome
+    
+    Output: {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
     """
     
     # Build gene: disorder metadata dictionary
@@ -60,15 +108,258 @@ def regulator_detection(grn, disorderlist):
             "targets": total_targets,
             "deg_targets": deg_targets,
             "driver_score": score, # = total regulatory influence
-            "normalized_score": normalized_score, # # = average influence per target
+            "normalized_score": normalized_score, # = average influence per target
             "mean_target_log2fc": mean_fc})
     
         tf_results.sort(key=lambda x: x["driver_score"], reverse=True)
 
     return tf_results
 
+def signed_regulator_detection(grn, disorderlist): # outputs tf_results. better than the last!
 
-def edgeweight_summary(adjlist,*condition:None): #works for any grn 
+    """
+    Detect regulatory drivers while preserving direction metadata.
+    
+    Identify TFs whose high-weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
+
+    Driver score per TF: sum(weight * abs(log2fc_target))
+    = estimates how strongly a transcription factor's regulatory edges align with observed expression changes.
+    aka total regulatory influence of a TF over the disease transcriptome
+    
+    Output: {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
+    """
+
+    gene_to_disorders = {}
+
+    for rec in disorderlist:
+        gene_id = rec[0]
+        info = tuple(rec[1:])
+        gene_to_disorders.setdefault(gene_id, []).append(info)
+
+    degset = set(gene_to_disorders.keys())
+
+    tf_results = []
+
+    for tf, targets in grn.items():
+
+        driver_score = 0
+        direction_score = 0
+
+        deg_targets = 0
+        total_targets = 0
+
+        log2fcs = []
+        up = 0
+        down = 0
+
+        for gene, weight in targets:
+
+            total_targets += 1
+
+            if gene not in degset:
+                continue
+
+            for disorder_info in gene_to_disorders[gene]:
+
+                log2fc = disorder_info[4]
+
+                driver_score += weight * abs(log2fc)
+                direction_score += weight * log2fc
+
+                log2fcs.append(log2fc)
+
+                deg_targets += 1
+
+                if log2fc > 0:
+                    up += 1
+                elif log2fc < 0:
+                    down += 1
+
+        if deg_targets == 0:
+            continue
+
+        mean_fc = sum(log2fcs) / len(log2fcs)
+
+        direction_ratio = direction_score / driver_score if driver_score != 0 else 0
+
+        tf_results.append({
+            "TF": tf,
+            "targets": total_targets,
+            "deg_targets": deg_targets,
+            "driver_score": driver_score,
+            "direction_score": direction_score,
+            "direction_ratio": direction_ratio,
+            "mean_target_log2fc": mean_fc,
+            "up_targets": up,
+            "down_targets": down
+        })
+
+    tf_results.sort(
+        key=lambda x: x["driver_score"],
+        reverse=True
+    )
+
+    return tf_results
+
+def classify_drivers(tf_results):
+
+    global_drivers = []
+    focused_drivers = []
+
+    for rec in tf_results:
+
+        if rec["driver_score"] > 10 and rec["normalized_score"] < 0.05:
+            global_drivers.append(rec)
+
+        if rec["normalized_score"] > 0.08:
+            focused_drivers.append(rec)
+
+    return global_drivers, focused_drivers
+
+def deg_enrichment(tf_results):
+
+    enriched = []
+
+    for rec in tf_results:
+
+        fraction = rec["deg_targets"] / rec["targets"]
+
+        if fraction > 0.15:
+            enriched.append(rec)
+
+    return enriched
+
+def plot_regulators(tf_results, top_n = 10):
+
+    """
+    Plot top 10 TF regulatory drivers by driver_score
+    """
+
+    top = tf_results[:top_n]
+
+    tfs = []
+    scores = []
+
+    for rec in top:
+        tfs.append(rec["TF"])
+        scores.append(rec["driver_score"])
+
+    plt.figure(figsize=(10,6))
+
+    plt.barh(tfs, scores)
+
+    plt.xlabel("GRN Edge Weight x Differential Expression") # aka regulatory score
+    plt.ylabel("Transcription Factor")
+
+    plt.title("Top Regulatory Drivers")
+
+    plt.gca().invert_yaxis()
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_deg_fraction(tf_results):
+
+    """
+    Scatter plot of TF targets vs DEG targets
+    """
+
+    targets = []
+    deg_targets = []
+    scores = []
+
+    for rec in tf_results:
+
+        targets.append(rec["targets"])
+        deg_targets.append(rec["deg_targets"])
+        scores.append(rec["driver_score"])
+
+    plt.figure(figsize=(7,6))
+
+    plt.scatter(targets, deg_targets)
+
+    plt.xlabel("Total TF Targets")
+    plt.ylabel("DEG Targets")
+
+    plt.title("DEG enrichment across TF regulons")
+
+    plt.tight_layout()
+    plt.show()
+
+def extract_modules(deggrn, tf_results, top_n = 10):
+
+    modules = {}
+
+    top_tfs = [i["TF"] for i in tf_results[:top_n]]
+
+    for tf in top_tfs:
+
+        targets = set()
+
+        for i in deggrn[tf]:
+            gene = i[0]
+            targets.add(gene)
+
+        modules[tf] = targets
+
+    return modules
+
+###################
+# use below fns for any adjlist of the structure
+
+def edgeweight_summary(adjlist, deg_set):
+    """
+    Input
+        adjlist : PANDA GRN adjacency list
+                  {TF: [(target, weight), ...]}
+
+        deg_set : set of differentially expressed genes
+
+    Output
+        dictionary summarizing edge weight statistics
+    """
+
+    tf_set = set(adjlist.keys())
+    detf_set = tf_set & deg_set
+
+    deg_weights = []
+    nondeg_weights = []
+    tf_means = []
+    detf_means = []
+
+    for tf, edges in adjlist.items():
+
+        weights = []
+
+        for gene, weight in edges:
+
+            weights.append(weight)
+
+            if gene in deg_set:
+                deg_weights.append(weight)
+            else:
+                nondeg_weights.append(weight)
+
+        if weights:
+
+            tf_mean = sum(weights) / len(weights)
+            tf_means.append(tf_mean)
+
+            if tf in detf_set:
+                detf_means.append(tf_mean)
+
+    # A large difference between DETF_mean_weight and TF_mean_weight MAY INDICATE some transcriptional driver behind a disorder's change
+    
+    summary = {
+        "DEG_weight": sum(deg_weights)/len(deg_weights) if deg_weights else 0, # measures regulatory pressure acting on dysregulated genes. (TF to DEG)
+        "nonDEG_weight": sum(nondeg_weights)/len(nondeg_weights) if nondeg_weights else 0, # baseline regulatory distribution (TF to background genes)
+        "TF_weight": sum(tf_means)/len(tf_means) if tf_means else 0, # avg regulatory strength across all TF regulators.
+        "DETF_weight": sum(detf_means)/len(detf_means) if detf_means else 0 # avg regulatory strength for DETFs
+    }
+
+    return summary
+
+def edgeweight_summary_old(adjlist, *condition:None): # AVERAGES DOESN'T WORK
     """
     Input:
         Any adjacency list structured as:
@@ -84,7 +375,7 @@ def edgeweight_summary(adjlist,*condition:None): #works for any grn
     tf_avg = [] # tf avgs
     g_avg = []
     degs_avg = [] # list of all DEG weights 
-    detfs_avg = []
+    detfs_avg = [] # no idea how to find this
     
     for tf, edges in adjlist.items():
         
@@ -97,7 +388,6 @@ def edgeweight_summary(adjlist,*condition:None): #works for any grn
                 
         tf_avg.append(sum(degs_avg) / len(degs_avg)) # adds average deg per tf
         
-        if 
     summary = { 
         "DEGs_average":  sum(degs_avg) / len(degs_avg), # averages all degs
         "TFs_avg": sum(tf_avg) / len(tf_avg), # average TF

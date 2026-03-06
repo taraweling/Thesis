@@ -51,33 +51,32 @@ def main():
     # convert geneIDs in disorders list of lists to ENSEMBL IDs
     degs = gu.ensemblifylist(test)
     
-
     # reduce GRN to just keys from disorders (REPLACED WITH DEG_GRN_BOTH VS DEG_GRN_TFS_ONLY)
     #deggrn = gu.filter_adjlist(brain,disorders)
     #print(len(grn),len(grn.items))
-    
     #print("brain first 10 keys:", list(grn)[:10])
+    
     degset = {row[0] for row in degs} # location of DEG col in input chart
     #print("deg first 10 keys:", list(degset)[:10])
-    print("overlap:", len(set(grn) & degset))
+    #print("overlap:", len(set(grn) & degset)) = 79 for test
 
     # merge list of lists with brain grn, cutting the grn down to just the keys in disorders
     """
-    1. deg_grn_tfsonly preserves network topology and adds annotation (has detf regulating all genes). 
+    1. de_grn_tfsonly preserves network topology and adds annotation (has detf regulating all genes). 
     A transcription factor's expression is abnormal in a disorder, so its regulatory output may be altered. 
     A TF that is upregulated or downregulated can shift expression of many genes that themselves are not significantly DE.
     Common where a master regulator shifts subtly but downstream genes do not pass DEG thresholds.
     Detects: regulatory amplification, TFs with unusually many DEG targets, TFs whose downstream genes shift collectively but weakly
     fraction DEG per TF = (# DEG targets) / (# total targets): measures how strongly that TF's regulated genes overlaps with disease signal.
     
-    2. deg_grn_both performs two-stage filtering, producing a smaller induced subgraph over DEG nodes (detf regulates deg)
+    2. de_grn_both performs two-stage filtering, producing a smaller induced subgraph over DEG nodes (detf regulates deg)
     Thus, identifying direct dysregulated regulatory cascades eg synaptic regulation, immune activation, chromatin modifiers
     Gives small but highest-confidence regulatory modules useful for pathway discovery, disease modules, candidate causal regulators
     Limitation is that many regulatory effects are lost because DEG thresholds are harsh, 
     brain tissue averages many cell types,
     TF activity does not always correlate with TF expression
     
-    3. deg_grn_genesonly has tf regulating degs. TF activity changes without expression change.
+    3. de_grn_genesonly has tf regulating degs. TF activity changes without expression change.
     post-translational TF activation (phosphorylation), chromatin accessibility change, 
     cofactor-dependent TF activation, 
     cell-type composition changes    
@@ -87,31 +86,30 @@ def main():
     tfgrn = gu.de_grn_tfsonly(grn,degs) # produces grn of differential tfs only
     deggrn = gu.de_grn_degsonly(grn,degs) # produces a grn of differential gene targets only
     
+    print(ga.regulatory_scores(detfdeggrn))
     # turn into edgelist
     detfdeggrnedgelist = gu.adjlist2edgelist(detfdeggrn)
+    
+    #######
     print("size of deg-detf-grn: ", len(detfdeggrn)) # graph this somehow comparing all of the above?
     print("size of tf-grn: ", len(tfgrn)) 
     print("size of deg-grn: ", len(deggrn)) 
-    
-    """for tf, edges in deggrn.items(): 
-        for e in edges[:5]:
-            print(len(e))
-        break
-    print("deg-grn keys:", list(deggrn)[:10])
-    """
-    
+        
     # run stats from graph_algos here!
-    
     # check number of positive vs negative DETFs
-    ga.edgeweight_summary(brains)
-    ga.edgeweight_summary(grn)
-    ga.edgeweight_summary(brainother)
-    ga.edgeweight_summary(brainbg)
+    # ga.edgeweight_summary()
+    # ga.edgeweight_summary(brains)
+    # ga.edgeweight_summary(grn)
+    # ga.edgeweight_summary(brainother)
+    # ga.edgeweight_summary(brainbg)
+    
     ga.edgeweight_summary(detfdeggrn)
     ga.edgeweight_summary(tfgrn)
+    ga.edgeweight_summary(deggrn)
     
     ga.log2fc_summary(detfdeggrn)
     ga.log2fc_summary(tfgrn)
+    ga.log2fc_summary(deggrn)
     
     """
     A TF ranks highly when it regulates many DEGs, the edges have strong PANDA weights and those genes show large expression changes
@@ -119,13 +117,13 @@ def main():
     
     TFs with high normalized score regulate dense clusters of dysregulated genes.
     """
+    
     bddrivers = ga.regulator_detection(grn, gu.disorder_list('data/DEGDataSample.csv','BD'))
     szdrivers = ga.regulator_detection(grn, gu.disorder_list('data/DEGDataSample.csv','SZ'))
     bdszdrivers = ga.regulator_detection(grn, gu.disorder_list('data/DEGDataSample.csv','SZ','BD'))
     
     for r in bddrivers[:10]:
         print(r,"\n")
-    
     
 
     """G = nx.from_dict_of_lists(
@@ -135,9 +133,8 @@ def main():
     #pyc.create_network_from_networkx(G, title="Test DEGs")
     
     
-    
     # visualize graph in new file
-    gv.viz_graph(deggrnedgelist,'results/deggrn.html')
+    gv.viz_graph(detfdeggrnedgelist,'results/deggrn.html')
     gv.visualize_deg_grn(detfdeggrn)
     gv.pyviz_deggrn(detfdeggrn)
     
