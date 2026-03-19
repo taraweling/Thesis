@@ -2,6 +2,7 @@ import csv # do i need this?
 from pyvis.network import Network as net
 import networkx as nx
 import matplotlib.pyplot as plt
+import numpy as np
 
 # use below fns on deg_grn_both to return tf_scores
 def regulatory_scores(deg_grn):
@@ -50,9 +51,9 @@ def regulatory_scores(deg_grn):
     return tf_scores
 
 ###################
-# use below fns on deg_grn_tfsonly. loses information on sign of regulation.
+# use below fns on deg_grn_tfsonly. 
 
-def regulator_detection(grn, disorderlist): # outputs tf_results
+def regulator_detection(grn, disorderlist): # outputs tf_results but loses information on sign of regulation.
 
     """
     Identify TFs whose high-weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
@@ -82,20 +83,22 @@ def regulator_detection(grn, disorderlist): # outputs tf_results
         deg_targets = 0
         total_targets = 0
         log2fcs = []
-
-        for gene, weight in targets:
-
+        
+        for edge in targets:
+            gene = edge[0]
+            weight = edge[1]
             total_targets += 1
-
+            
             if gene not in degset:
                 continue
+
+            deg_targets += 1
 
             for disorder_info in gene_to_disorders[gene]:
                 log2fc = disorder_info[4]
                 score += weight * abs(log2fc)
                 log2fcs.append(log2fc)
-                deg_targets += 1
-
+                
         if deg_targets == 0:
             continue
 
@@ -136,7 +139,7 @@ def signed_regulator_detection(grn, disorderlist): # outputs tf_results. better 
         info = tuple(rec[1:])
         gene_to_disorders.setdefault(gene_id, []).append(info)
 
-    degset = set(gene_to_disorders.keys())
+    deg_set = set(gene_to_disorders.keys())
 
     tf_results = []
 
@@ -152,11 +155,14 @@ def signed_regulator_detection(grn, disorderlist): # outputs tf_results. better 
         up = 0
         down = 0
 
-        for gene, weight in targets:
-
+        for edge in targets:
+            
+            gene = edge[0]
+            weight = edge[1]
+            
             total_targets += 1
 
-            if gene not in degset:
+            if gene not in deg_set:
                 continue
 
             for disorder_info in gene_to_disorders[gene]:
@@ -307,7 +313,7 @@ def extract_modules(deggrn, tf_results, top_n = 10):
 ###################
 # use below fns for any adjlist of the structure
 
-def edgeweight_summary(adjlist, deg_set):
+def edgeweight_summary(grn, degset):
     """
     Input
         adjlist : PANDA GRN adjacency list
@@ -319,20 +325,26 @@ def edgeweight_summary(adjlist, deg_set):
         dictionary summarizing edge weight statistics
     """
 
-    tf_set = set(adjlist.keys())
+    tf_set = set(grn.keys()) 
+    deg = {element[0]: element[1] for element in degset} # builds dict of only the gene id and edge weight
+    deg_set = set(deg.keys()) 
     detf_set = tf_set & deg_set
+    print("detfs",(list(detf_set)[:10]),list(deg_set)[:10])
 
     deg_weights = []
     nondeg_weights = []
     tf_means = []
     detf_means = []
 
-    for tf, edges in adjlist.items():
+    for tf, edges in grn.items():
 
         weights = []
 
-        for gene, weight in edges:
-
+        for edge in edges:
+            
+            gene = edge[0]
+            weight = edge[1]
+            
             weights.append(weight)
 
             if gene in deg_set:
@@ -395,13 +407,99 @@ def edgeweight_summary_old(adjlist, *condition:None): # AVERAGES DOESN'T WORK
         "G_avg": sum(g_avg) / len(g_avg)
         }
     
-    print(summary) # remove later 
     return summary
 
 # what about a function to look at differential TFs and the genes they regulate? 
 # would require 
 
-def log2fc_summary(adjlist): # only applies to degs = whatever has 7 values 
+# DEG layer: aggregates all log2fc observations per gene. assigns gene sign by majority across observations
+#TF layer: computes mean log2fc of DEG targets per TF. assigns TF “effect sign” based on its targets
+
+def log2fc_summary(adjlist): # used chatgpt to fix previous function
+
+    # gene -> list of log2fc values (prevents overwrite)
+    gene_log2fc = {}
+
+    # TF inferred effect sign (not DETF)
+    tf_effect_sign = {}
+
+    tf_avg = []   # per-TF mean log2fc of its DEG targets
+    deg_avg = []  # global DEG log2fc values
+
+    for tf, edges in adjlist.items():
+
+        tf_values = []   # per-TF log2fc values
+        tf_signs = []
+
+        for edge in edges:
+
+            # expect DEG-enriched edge structure
+            if len(edge) > 6:
+
+                gene = edge[0]
+                log2fc = edge[6]
+
+                # store all observations per gene
+                gene_log2fc.setdefault(gene, []).append(log2fc)
+
+                deg_avg.append(log2fc)
+                tf_values.append(log2fc)
+
+                if log2fc > 0:
+                    tf_signs.append("positive")
+                elif log2fc < 0:
+                    tf_signs.append("negative")
+                else:
+                    tf_signs.append("zero")
+
+        # per-TF average (only if it regulates ≥1 DEG)
+        if tf_values:
+            tf_mean = sum(tf_values) / len(tf_values)
+            tf_avg.append(tf_mean)
+
+        # infer TF effect direction from its DEG targets
+        if tf_signs:
+            pos = tf_signs.count("positive")
+            neg = tf_signs.count("negative")
+
+            if pos > neg:
+                tf_effect_sign[tf] = "positive"
+            elif neg > pos:
+                tf_effect_sign[tf] = "negative"
+            else:
+                tf_effect_sign[tf] = "zero"
+
+    # collapse gene-level signs (majority across observations)
+    deg_sign = {}
+    for gene, vals in gene_log2fc.items():
+        pos = sum(1 for v in vals if v > 0)
+        neg = sum(1 for v in vals if v < 0)
+
+        if pos > neg:
+            deg_sign[gene] = "positive"
+        elif neg > pos:
+            deg_sign[gene] = "negative"
+        else:
+            deg_sign[gene] = "zero"
+
+    def safe_mean(x):
+        return sum(x) / len(x) if x else 0
+
+    summary = {
+        "DEGs_total": len(deg_sign),
+        "DEGs_average": safe_mean(deg_avg),
+        "DEGs_positive": sum(1 for s in deg_sign.values() if s == "positive"),
+        "DEGs_negative": sum(1 for s in deg_sign.values() if s == "negative"),
+
+        "TFs_total": len(tf_effect_sign),
+        "TFs_avg": safe_mean(tf_avg),
+        "TFs_positive": sum(1 for s in tf_effect_sign.values() if s == "positive"),
+        "TFs_negative": sum(1 for s in tf_effect_sign.values() if s == "negative"),
+    }
+
+    return summary
+
+def log2fc_summary_old(adjlist): # only applies to degs = whatever has 7 values 
     #per tf (which does not have to be differentially regulated)
     
     """
@@ -426,6 +524,7 @@ def log2fc_summary(adjlist): # only applies to degs = whatever has 7 values
     
     for tf, edges in adjlist.items(): # avgs might not work
 
+        
         tf_signs = [] # collects all tf's pos or neg regulation per deg
         tf_weight = []
         for edge in edges: # loops through each gene
@@ -436,15 +535,15 @@ def log2fc_summary(adjlist): # only applies to degs = whatever has 7 values
                 sign = ''
                 if weight > 0.0:
                     sign = "positive"
-                else:
+                elif weight < 0.0:
                     sign = "negative"
                 
                 deg_sign[gene] = sign # key = DEG, value = sign
                 tf_signs.append(sign) # adds sign to list of tf reg
                 deg_avg.append(weight) 
+                
+        tf_avg += np.sum(deg_avg) / len(deg_avg) # averages all deg weights per tf
     
-        tf_avg += sum(deg_avg) / len(deg_avg) # averages all deg weights per tf
-        
         if tf_signs: # tf differential values are obtained by comparing counts 
   
             pos = tf_signs.count("positive")
@@ -456,7 +555,7 @@ def log2fc_summary(adjlist): # only applies to degs = whatever has 7 values
                 detf_sign[tf] = "negative"
             else:
                 detf_sign[tf] = "zero"
-
+                
     summary = { 
         "DEGs_total": len(deg_sign),
         "DEGs_average":  sum(deg_avg) / len(deg_avg), # averages all degs
@@ -470,12 +569,9 @@ def log2fc_summary(adjlist): # only applies to degs = whatever has 7 values
         "TFs_negative": sum(1 for s in detf_sign.values() if s == "negative"),
         }
 
-    print(summary) # remove later
     return summary
 
 def kmeans(adjlist): # struggles with clusters of different densities (aka evens out size)
-    
-    
     
     return
 

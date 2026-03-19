@@ -1,4 +1,5 @@
 import csv
+import numpy as np
 from pyvis.network import Network 
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -51,12 +52,7 @@ def main():
     # convert geneIDs in disorders list of lists to ENSEMBL IDs
     degs = gu.ensemblifylist(test)
     
-    # reduce GRN to just keys from disorders (REPLACED WITH DEG_GRN_BOTH VS DEG_GRN_TFS_ONLY)
-    #deggrn = gu.filter_adjlist(brain,disorders)
-    #print(len(grn),len(grn.items))
-    #print("brain first 10 keys:", list(grn)[:10])
-    
-    degset = {row[0] for row in degs} # location of DEG col in input chart
+    #degset = {row[0] for row in degs} # location of DEG col in input chart
     #print("deg first 10 keys:", list(degset)[:10])
     #print("overlap:", len(set(grn) & degset)) = 79 for test
 
@@ -89,11 +85,6 @@ def main():
     print(ga.regulatory_scores(detfdeggrn))
     # turn into edgelist
     detfdeggrnedgelist = gu.adjlist2edgelist(detfdeggrn)
-    
-    #######
-    print("size of deg-detf-grn: ", len(detfdeggrn)) # graph this somehow comparing all of the above?
-    print("size of tf-grn: ", len(tfgrn)) 
-    print("size of deg-grn: ", len(deggrn)) 
         
     # run stats from graph_algos here!
     # check number of positive vs negative DETFs
@@ -103,9 +94,9 @@ def main():
     # ga.edgeweight_summary(brainother)
     # ga.edgeweight_summary(brainbg)
     
-    ga.edgeweight_summary(detfdeggrn)
-    ga.edgeweight_summary(tfgrn)
-    ga.edgeweight_summary(deggrn)
+    ga.regulatory_scores(detfdeggrn)
+    bd1 = ga.regulator_detection(tfgrn,gu.disorder_list('data/DEGDataSample.csv','BD'))
+    bd2 = ga.edgeweight_summary(deggrn,gu.disorder_list('data/DEGDataSample.csv','BD'))
     
     ga.log2fc_summary(detfdeggrn)
     ga.log2fc_summary(tfgrn)
