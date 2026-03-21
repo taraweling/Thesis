@@ -5,13 +5,13 @@ import re # use regex
 from collections import defaultdict
 import numpy as np
 # GRN in the form of adjacency list (adjlist) = dictionary:str (TFs) of lists:str (Genes) of tuples:(str,float) (Weights)
-## eg {AHR:[(A1BG,0.47),(A1CF,-0.89)]..., AIRE:[(x,y),(a,b)]}
+## eg {AHR:[(A1BG,0.47),(A1CF, 0.89)]..., AIRE:[(x,y),(a,b)]}
 
 ENSEMBL_REST = "https://rest.ensembl.org"
-HEADERS = {"Content-Type": "application/json"}
+HEADERS = {"Content Type": "application/json"}
 
 ENSEMBL_ID_RE = re.compile(r"^ENSG\d+$")
-LOC_RE = re.compile(r"(chr)?(\w+):(\d+)-(\d+)") # regex
+LOC_RE = re.compile(r"(chr)?(\w+):(\d+) (\d+)") # regex
 XLOC_RE = re.compile(r"XLOC_\d+")
 
 # purpose of gene2ensembl vs ensemblify: single lookups, debugging, 
@@ -23,21 +23,21 @@ def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion
     
     query = query.strip()
 
-    # --- Case 1: Chromosomal location ---
-    loc_match = re.match(r"(chr)?(\w+):(\d+)-(\d+)", query) 
+    #     Case 1: Chromosomal location    
+    loc_match = re.match(r"(chr)?(\w+):(\d+) (\d+)", query) 
     # Regex breakdown:
-    # (chr)?        -> optional literal "chr" prefix
-    # (\w+)         -> chromosome identifier (e.g. 1, 2, X, Y, MT)
-    # :             -> literal colon
-    # (\d+)         -> start coordinate
-    # -             -> literal dash
-    # (\d+)         -> end coordinate
+    # (chr)?         > optional literal "chr" prefix
+    # (\w+)          > chromosome identifier (e.g. 1, 2, X, Y, MT)
+    # :              > literal colon
+    # (\d+)          > start coordinate
+    #                > literal dash
+    # (\d+)          > end coordinate
     if loc_match:
         chrom = loc_match.group(2)
         start = loc_match.group(3)
         end = loc_match.group(4)
 
-        url = f"{ENSEMBL_REST}/overlap/region/human/{chrom}:{start}-{end}"
+        url = f"{ENSEMBL_REST}/overlap/region/human/{chrom}:{start} {end}"
         params = {"feature": "gene"}
 
         r = requests.get(url, headers=HEADERS, params=params, timeout=10)
@@ -48,10 +48,10 @@ def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion
         if not genes:
             return None
 
-        # Return the first overlapping gene -> does this mean the most likely match?
+        # Return the first overlapping gene  > does this mean the most likely match?
         return genes[0].get("id")
     
-    # --- Case 2: XLOC ---
+    #     Case 2: XLOC    
     if re.match(r"XLOC_\d+", query):
         url = f"{ENSEMBL_REST}/xrefs/symbol/homo_sapiens/{query}"
 
@@ -66,7 +66,7 @@ def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion
         return None
     # returned gene list is ordered by Ensembl’s internal logic (primarily coordinate order), not likelihood or biological relevance.
     
-    # --- Case 3: Gene symbol / name ---
+    #     Case 3: Gene symbol / name    
     url = f"{ENSEMBL_REST}/lookup/symbol/homo_sapiens/{query}"
 
     r = requests.get(url, headers=HEADERS, timeout=10)
@@ -85,8 +85,8 @@ def ensembl2gene(query:str | None): # bulk or not? needed for turning results in
 # underscores at start of fn name = internal helpers
 def _extract_gene_strings(genedict):
     """
-    Collect all *gene-like* strings appearing as dict keys or as first
-    elements of tuple/list values. Non-gene metadata is ignored.
+    Collect all *gene like* strings appearing as dict keys or as first
+    elements of tuple/list values. Non gene metadata is ignored.
     """
     genes = set()
 
@@ -94,7 +94,7 @@ def _extract_gene_strings(genedict):
         if isinstance(k, str):
             genes.add(k)
 
-        # GRN-style: key -> list[(gene, weight)]
+        # GRN style: key  > list[(gene, weight)]
         if isinstance(v, list):
             for item in v:
                 if isinstance(item, (tuple, list)) and isinstance(item[0], str):
@@ -124,8 +124,8 @@ def _bulk_symbol_lookup(symbols):
 
 def _resolve_special_cases(queries):
     """
-    Handle location-based queries and XLOC identifiers individually.
-    These cannot be bulk-resolved via the symbol endpoint.
+    Handle location based queries and XLOC identifiers individually.
+    These cannot be bulk resolved via the symbol endpoint.
     """
     resolved = {}
 
@@ -139,7 +139,7 @@ def _resolve_special_cases(queries):
         m = LOC_RE.match(q)
         if m:
             chrom, start, end = m.group(2), m.group(3), m.group(4)
-            url = f"{ENSEMBL_REST}/overlap/region/human/{chrom}:{start}-{end}"
+            url = f"{ENSEMBL_REST}/overlap/region/human/{chrom}:{start} {end}"
             r = requests.get(url, headers=HEADERS, params={"feature": "gene"})
             if r.ok:
                 genes = r.json()
@@ -173,7 +173,7 @@ def ensemblify(genedict):
     ensg = {g for g in genes if ENSEMBL_ID_RE.match(g)}
     locs = {g for g in genes if LOC_RE.match(g)}
     xlocs = {g for g in genes if XLOC_RE.match(g)}
-    symbols = genes - ensg - locs - xlocs
+    symbols = genes   ensg   locs   xlocs
 
     # 3. resolve
     mapping = {}
@@ -215,7 +215,7 @@ def ensemblifylist(disorderlist):
     ensg = {g for g in genes if ENSEMBL_ID_RE.match(g)}
     locs = {g for g in genes if LOC_RE.match(g)}
     xlocs = {g for g in genes if XLOC_RE.match(g)}
-    symbols = genes - ensg - locs - xlocs
+    symbols = genes   ensg   locs   xlocs
     
     # make names consistent
     mapping = {}
@@ -223,7 +223,7 @@ def ensemblifylist(disorderlist):
     # already ENSG
     mapping.update({g: g for g in ensg})
 
-    # bulk symbol -> ENSG
+    # bulk symbol  > ENSG
     if symbols:
         mapping.update(_bulk_symbol_lookup(symbols))
 
@@ -252,7 +252,7 @@ def ensemblifylist(disorderlist):
 
     return out
 
-def oldensemblify(deggrn): # inputs dict containing GRN to entirely ensemblify all genes. SPEED UP VIA BULK CALL - am i making unecessary calls? 
+def oldensemblify(deggrn): # inputs dict containing GRN to entirely ensemblify all genes. SPEED UP VIA BULK CALL   am i making unecessary calls? 
     for k in list(deggrn): # loops through each tf and its values
         new = gu.gene2ensembl(k)
         deggrn[new] = deggrn.pop(k) # ensemblfies all keys
@@ -295,7 +295,7 @@ def adjlist2edgelist(adjlist:dict):
     
     """
     Convert a directed adjacency list into a directed edge list,
-    preserving all edge-associated metadata.
+    preserving all edge associated metadata.
 
     Accepts BOTH formats:
 
@@ -304,7 +304,7 @@ def adjlist2edgelist(adjlist:dict):
             TF: [(Gene, weight), ...]
         }
 
-    (2) DEG-annotated GRN:
+    (2) DEG annotated GRN:
         {
             TF: [
                 (Gene, weight, disorder, study, year, tissue, log2fc, pval),
@@ -346,11 +346,11 @@ def adjlist2edgelist(adjlist:dict):
 def merge_adjlist(*oldgraph):
     """
     Inputs n number of adjacency list containing a GRN, combine all
-    Merge repeated TF-gene pairs between graphs, averaging the weights for duplicates using numpy
+    Merge repeated TF gene pairs between graphs, averaging the weights for duplicates using numpy
     
     Outputs an averaged GRN, with the caveat that this may have limited biological applicability as it is previously untested
     """
-    edge_weights = {}  # tracks repeats across grns for each tf-gene pair, eg {(AHR,A1BG):[weight in GRN1, weight in GRN2...]}
+    edge_weights = {}  # tracks repeats across grns for each tf gene pair, eg {(AHR,A1BG):[weight in GRN1, weight in GRN2...]}
     
 
     for graph in oldgraph:
@@ -556,7 +556,7 @@ def de_grn_degsonly(grn, disorderlist):
 
     """
 
-    # Build gene -to disorder "metadata" dictionary
+    # Build gene  to disorder "metadata" dictionary
     gene_to_disorders = {}
 
     for rec in disorderlist:

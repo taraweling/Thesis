@@ -9,13 +9,16 @@ input_file = "data/degsensembl.csv"
 output_file = "data/degsensemblfinal.csv"
 
 
-def batch_gene2ensembl(genes, batch_size=100):
-    """
-    Maps gene symbols to Ensembl IDs using batch POST.
-    Returns dict: {gene_symbol: ensembl_id or None}
-    """
+def normalize_gene(g):
+    if not g:
+        return None
+    return g.replace("\xa0", "").replace("\r", "").strip().upper()
+
+
+def robust_gene2ensembl(genes, batch_size=100):
     mapping = {}
 
+    # --- batch lookup ---
     for i in range(0, len(genes), batch_size):
         batch = genes[i:i + batch_size]
 
@@ -24,12 +27,7 @@ def batch_gene2ensembl(genes, batch_size=100):
 
         try:
             r = requests.post(url, headers=HEADERS, json=payload, timeout=20)
-            if not r.ok:
-                for g in batch:
-                    mapping[g] = None
-                continue
-
-            data = r.json()
+            data = r.json() if r.ok else {}
 
             for g in batch:
                 entry = data.get(g)
@@ -39,7 +37,44 @@ def batch_gene2ensembl(genes, batch_size=100):
             for g in batch:
                 mapping[g] = None
 
-        time.sleep(0.2)  # mild rate control
+        time.sleep(0.2)
+
+    # --- fallback: xrefs ---
+    missing = [g for g, v in mapping.items() if v is None]
+    print("Missing after batch:", len(missing))
+
+    for g in missing:
+        try:
+            url = f"{ENSEMBL_REST}/xrefs/symbol/homo_sapiens/{g}"
+            r = requests.get(url, headers=HEADERS, timeout=10)
+
+            if r.ok:
+                xrefs = r.json()
+                gene_ids = [x["id"] for x in xrefs if x.get("type") == "gene"]
+                mapping[g] = gene_ids[0] if gene_ids else None
+
+        except Exception:
+            pass
+
+        time.sleep(0.05)
+
+    # --- final fallback ---
+    still_missing = [g for g, v in mapping.items() if v is None]
+    print("Still missing after xrefs:", len(still_missing))
+
+    for g in still_missing:
+        try:
+            url = f"{ENSEMBL_REST}/lookup/symbol/homo_sapiens/{g}"
+            r = requests.get(url, headers=HEADERS, timeout=10)
+
+            if r.ok:
+                data = r.json()
+                mapping[g] = data.get("id")
+
+        except Exception:
+            pass
+
+        time.sleep(0.05)
 
     return mapping
 
@@ -62,23 +97,33 @@ def fill_ensembl_ids(input_path, output_path):
 
         for row in reader:
             row = {k.strip(): v for k, v in row.items()}
-            gene = row.get("GENEID")
+            gene_raw = row.get("GENEID")
+
+            gene = normalize_gene(gene_raw) if gene_raw else None
 
             rows.append(row)
             if gene:
-                genes.append(gene.strip())
+                genes.append(gene)
+
+        genes = list(set(genes))
 
         print("Total rows:", len(rows))
-        print("Unique genes:", len(set(genes)))
+        print("Unique genes:", len(genes))
 
-        mapping = batch_gene2ensembl(list(set(genes)))
+        mapping = robust_gene2ensembl(genes)
+
+        unmapped = [g for g, v in mapping.items() if v is None]
+        print("Final unmapped:", len(unmapped))
+        print("Examples:", unmapped[:10])
 
         with open(output_path, "w", newline="", encoding="utf-8") as outfile:
             writer = csv.DictWriter(outfile, fieldnames=fieldnames, delimiter=dialect.delimiter)
             writer.writeheader()
 
             for row in rows:
-                gene = row.get("GENEID")
+                gene_raw = row.get("GENEID")
+                gene = normalize_gene(gene_raw) if gene_raw else None
+
                 row["ENSEMBLID"] = mapping.get(gene, "") if gene else ""
 
                 clean_row = {k: row.get(k, "") for k in fieldnames}

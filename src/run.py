@@ -9,7 +9,7 @@ import graph_algos as ga
 import json
 import py4cytoscape as pyc
 import pandas as pd
-import time # start = time.time(); multi_time = time.time() - start; print(f"Multi-threaded:  {multi_time:.3f}s")
+import time # start = time.time(); multi_time = time.time()   start; print(f"Multi threaded:  {multi_time:.3f}s")
 
 # INSTRUCTIONS: RUN WHILE IN SRC FOLDER
 def main():
@@ -18,7 +18,7 @@ def main():
     ## what information do I want in my graph?
     """
     as a bipartite graph, node attribute should either be TF or gene. 
-    the TFs are DEGs and the target genes can be either DEGs or not-differentially expressed genes in the GRAND regulatory network 
+    the TFs are DEGs and the target genes can be either DEGs or not differentially expressed genes in the GRAND regulatory network 
     """
     
     # test make_adjlist
@@ -30,7 +30,7 @@ def main():
     brainother = gu.make_adjlist('data/Brain_Other.csv',0.7) 
     brainbg = gu.make_adjlist('data/Brain_Basal_Ganglia.csv',0.7)
 
-    # test merge_adjlist's weight-averaging feature: AHR-A1BG SHOULD have a weight of ~0.2
+    # test merge_adjlist's weight averaging feature: AHR A1BG SHOULD have a weight of ~0.2
     #testadjlist2 = {'AHR': [('A1BG', 0.0), ('A4GALT', 0.314864), ('AHR', 0.131604), ('ALX3', 0.208409)]}
     #testmerge = utils.merge_adjlist(testadjlist,testadjlist2)
     #print(testmerge,'\n')
@@ -47,10 +47,22 @@ def main():
     
     # get adjlists per disorder by inputting the name of the disorder
     ## (options = AD, ADHD, BD, SZ, MDD, OCD) and the file location, outputting a list of lists   
-    test = gu.disorder_list('data/DEGDataSample.csv','BD')
+    ad = gu.disorder_list('data/DEGData.csv','AD')
+    adhd = gu.disorder_list('data/DEGData.csv','ADHD')
+    asd = gu.disorder_list('data/DEGData.csv','ASD')
+    bd = gu.disorder_list('data/DEGData.csv','BD')
+    mdd = gu.disorder_list('data/DEGData.csv','MDD')
+    ocd = gu.disorder_list('data/DEGData.csv','OCD')
+    sz = gu.disorder_list('data/DEGData.csv','SZ')
 
     # convert geneIDs in disorders list of lists to ENSEMBL IDs
-    degs = gu.ensemblifylist(test)
+    addegs = gu.ensemblifylist(ad)
+    adhddegs = gu.ensemblifylist(adhd)
+    asddegs = gu.ensemblifylist(asd)
+    bddegs = gu.ensemblifylist(bd)
+    mdddegs = gu.ensemblifylist(mdd)
+    ocddegs = gu.ensemblifylist(ocd)
+    szdegs = gu.ensemblifylist(sz)
     
     #degset = {row[0] for row in degs} # location of DEG col in input chart
     #print("deg first 10 keys:", list(degset)[:10])
@@ -65,17 +77,17 @@ def main():
     Detects: regulatory amplification, TFs with unusually many DEG targets, TFs whose downstream genes shift collectively but weakly
     fraction DEG per TF = (# DEG targets) / (# total targets): measures how strongly that TF's regulated genes overlaps with disease signal.
     
-    2. de_grn_both performs two-stage filtering, producing a smaller induced subgraph over DEG nodes (detf regulates deg)
+    2. de_grn_both performs two stage filtering, producing a smaller induced subgraph over DEG nodes (detf regulates deg)
     Thus, identifying direct dysregulated regulatory cascades eg synaptic regulation, immune activation, chromatin modifiers
-    Gives small but highest-confidence regulatory modules useful for pathway discovery, disease modules, candidate causal regulators
+    Gives small but highest confidence regulatory modules useful for pathway discovery, disease modules, candidate causal regulators
     Limitation is that many regulatory effects are lost because DEG thresholds are harsh, 
     brain tissue averages many cell types,
     TF activity does not always correlate with TF expression
     
     3. de_grn_genesonly has tf regulating degs. TF activity changes without expression change.
-    post-translational TF activation (phosphorylation), chromatin accessibility change, 
-    cofactor-dependent TF activation, 
-    cell-type composition changes    
+    post translational TF activation (phosphorylation), chromatin accessibility change, 
+    cofactor dependent TF activation, 
+    cell type composition changes    
     """
     
     detfdeggrn = gu.de_grn_both(grn,degs) # produces grn of differential tfs AND differential gene targets

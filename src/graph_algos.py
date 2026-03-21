@@ -56,7 +56,7 @@ def regulatory_scores(deg_grn):
 def regulator_detection(grn, disorderlist): # outputs tf_results but loses information on sign of regulation.
 
     """
-    Identify TFs whose high-weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
+    Identify TFs whose high weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
 
     Driver score per TF: sum(weight * abs(log2fc_target))
     = estimates how strongly a transcription factor's regulatory edges align with observed expression changes.
@@ -123,7 +123,7 @@ def signed_regulator_detection(grn, disorderlist): # outputs tf_results. better 
     """
     Detect regulatory drivers while preserving direction metadata.
     
-    Identify TFs whose high-weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
+    Identify TFs whose high weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
 
     Driver score per TF: sum(weight * abs(log2fc_target))
     = estimates how strongly a transcription factor's regulatory edges align with observed expression changes.
@@ -379,9 +379,9 @@ def edgeweight_summary_old(adjlist, *condition:None): # AVERAGES DOESN'T WORK
     
     Output:
         printable dict containing average edge weight counts for:
-            - DETFs (TF nodes)
-            - DEGs (targets)
-            - DEXs (both tfs and gene targets)
+              DETFs (TF nodes)
+              DEGs (targets)
+              DEXs (both tfs and gene targets)
             
     """
     tf_avg = [] # tf avgs
@@ -417,23 +417,23 @@ def edgeweight_summary_old(adjlist, *condition:None): # AVERAGES DOESN'T WORK
 
 def log2fc_summary(adjlist): # used chatgpt to fix previous function
 
-    # gene -> list of log2fc values (prevents overwrite)
+    # gene  > list of log2fc values (prevents overwrite)
     gene_log2fc = {}
 
     # TF inferred effect sign (not DETF)
     tf_effect_sign = {}
 
-    tf_avg = []   # per-TF mean log2fc of its DEG targets
+    tf_avg = []   # per TF mean log2fc of its DEG targets
     deg_avg = []  # global DEG log2fc values
 
     for tf, edges in adjlist.items():
 
-        tf_values = []   # per-TF log2fc values
+        tf_values = []   # per TF log2fc values
         tf_signs = []
 
         for edge in edges:
 
-            # expect DEG-enriched edge structure
+            # expect DEG enriched edge structure
             if len(edge) > 6:
 
                 gene = edge[0]
@@ -452,7 +452,7 @@ def log2fc_summary(adjlist): # used chatgpt to fix previous function
                 else:
                     tf_signs.append("zero")
 
-        # per-TF average (only if it regulates ≥1 DEG)
+        # per TF average (only if it regulates ≥1 DEG)
         if tf_values:
             tf_mean = sum(tf_values) / len(tf_values)
             tf_avg.append(tf_mean)
@@ -469,7 +469,7 @@ def log2fc_summary(adjlist): # used chatgpt to fix previous function
             else:
                 tf_effect_sign[tf] = "zero"
 
-    # collapse gene-level signs (majority across observations)
+    # collapse gene level signs (majority across observations)
     deg_sign = {}
     for gene, vals in gene_log2fc.items():
         pos = sum(1 for v in vals if v > 0)
@@ -504,7 +504,7 @@ def log2fc_summary_old(adjlist): # only applies to degs = whatever has 7 values
     
     """
     Input:
-        DEG-GRN adjacency list structured as :
+        DEG GRN adjacency list structured as :
             {TF: (DEG1, etc), (DEG2, etc)]}
             
         Figure out later if I should cut TFs down to DETF...
@@ -512,12 +512,12 @@ def log2fc_summary_old(adjlist): # only applies to degs = whatever has 7 values
 
     Output:
         dict containing sign counts for:
-            - DEGs (targets)
-            - DETFs (TF nodes)
+              DEGs (targets)
+              DETFs (TF nodes)
     """
     
-    deg_sign = {}   # gene -> sign
-    detf_sign = {}  # tf -> sign (relies on tf_signs within loop)
+    deg_sign = {}   # gene  > sign
+    detf_sign = {}  # tf  > sign (relies on tf_signs within loop)
     tf_avg = []  # collects the avg reg weights of TFs that regulates a DEG 
     deg_avg = [] # collects the reg weights of DEGs
     # as calculated by averaging all its DEG target's log2fc   
@@ -591,7 +591,7 @@ def calculate_clustering_coeff(adjlist): # input = adjlist like the one from A
         
         # find total number of edges by adding all values of the input dictionary for denominator
         degree = len(adjlist[i])
-        emax = degree * (degree-1)
+        emax = degree * (degree 1)
         
         # check if denominator = 0 and equation is undefined
         if emax == 0:
@@ -616,12 +616,12 @@ def calculate_clustering_coeff(adjlist): # input = adjlist like the one from A
     
     return C
 
-# I received help from CS drop-in tutor Doran Penner for the below fn
+# I received help from CS drop in tutor Doran Penner for the below fn
 def calculate_closeness(adjlist): #input adjlist from A, output dict of (node, closeness) pairs
     S = {} # dict to return
     closeness = 0.0
     #  closeness centrality = reciprocal of the sum of all nodes' shortest paths to v.
-    # also see: len of adjlist - 1 / sum of shortest paths to each nodes
+    # also see: len of adjlist   1 / sum of shortest paths to each nodes
 
     # initiate and populate distances dictionary
     
@@ -650,10 +650,10 @@ def calculate_closeness(adjlist): #input adjlist from A, output dict of (node, c
                     shortestpathdict[neighbor] = shortestpathdict[exploring] + 1
                     Q.append(neighbor)
         
-        # hi: shortestpathdict bw non-i and everything else
+        # hi: shortestpathdict bw non i and everything else
         ## calc closeness of i
 
-        numerator = (len(adjlist))-1.0
+        numerator = (len(adjlist)) 1.0
         denominator = 0.0
         # with dictionary of distances, sum up all values from 'u's to v 
         denominator = sum(shortestpathdict.values())

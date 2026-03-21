@@ -19,7 +19,7 @@ import math
 def regulon_viz(adjlist, outfile ="regulon.html"): 
     return
     
-def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make not directed so it resembles a co-expression net
+def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make not directed so it resembles a co expression net
     """
     Visualize a Gene Regulatory Network (GRN) stored as an adjacency list.
 
@@ -42,11 +42,11 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make n
         Interactive HTML visualization written to `outfile`.
 
     Visual encodings (if available):
-        - Edge width  -> |weight|
-        - TF nodes    -> triangle
-        - Gene nodes  -> circle
-        - Node size   -> -log10(pval)
-        - Node color  -> log2fc (red up / blue down)
+          Edge width   > |weight|
+          TF nodes     > triangle
+          Gene nodes   > circle
+          Node size    >  log10(pval)
+          Node color   > log2fc (red up / blue down)
     """
 
     G = Network(directed=directed)
@@ -77,10 +77,10 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make n
 
         shape = "triangle" if info.get("type") == "TF" else "circle"
 
-        # size from p-value
+        # size from p value
         size = 20
         if info.get("pval") is not None and info["pval"] > 0:
-            size = min(60, 10 + (-math.log10(info["pval"]) * 6)) # what does this do
+            size = min(60, 10 + ( math.log10(info["pval"]) * 6)) # what does this do
 
         # color from log2fc
         color = "#cccccc"
@@ -115,7 +115,7 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make n
 
 def visualize_deg_grn(adjlist, min_pval=None, min_abs_log2fc=None, max_abs_log2fc=None, max_edges=1000, seed=0):
     """
-    Visualize a DEG-GRN adjacency list.
+    Visualize a DEG GRN adjacency list.
 
     adjlist format:
     {
@@ -235,12 +235,12 @@ def viz_graph(edgelist, outfile): # constructed using anna ritz's course assignm
         [TF, Gene, weight, disorder, study, year, tissue, log2fc, pval]
 
     Visualization (if present):
-        - Edge width  -> |weight|
-        - TF nodes    -> triangle
-        - Gene nodes  -> circle
-        - Node size   -> -log10(pval)
-        - Node outline color -> disorder
-        - Node fill color -> log2fc (red up / blue down)
+          Edge width   > |weight|
+          TF nodes     > triangle
+          Gene nodes   > circle
+          Node size    >  log10(pval)
+          Node outline color  > disorder
+          Node fill color  > log2fc (red up / blue down)
     """
 
     G = Network(directed=True)
@@ -292,7 +292,7 @@ def viz_graph(edgelist, outfile): # constructed using anna ritz's course assignm
         size = 20
         if info["pval"] is not None and info["pval"] > 0:
             import math
-            size = min(60, 10 + (-math.log10(info["pval"]) * 6))
+            size = min(60, 10 + ( math.log10(info["pval"]) * 6))
 
         # fill color from log2fc
         fill = "#cccccc"
@@ -338,7 +338,7 @@ def old_viz_graph(edgelist, outfile):
     Input rows:
         [TF, Gene, weight, ...metadata...]
 
-    Only TF -> Gene is used for topology.
+    Only TF  > Gene is used for topology.
     Weight is optionally used to scale edge width.
     """
 
