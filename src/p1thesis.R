@@ -1,4 +1,3 @@
-# Install packages
 install.packages("data.table")
 install.packages("tidyverse")
 install.packages("dplyr")
@@ -18,7 +17,7 @@ install.packages('pheatmap')
 install.packages("DOSE")
 install.packages("enrichplot")
 install.packages("ggupset")
-
+install.packages("jsonlite")
 
 BiocManager::install(version = "3.22") # keep at 3.22 for consistency
 BiocManager::install("clusterProfiler", lib="~/R/library")
@@ -98,7 +97,7 @@ meta_disorder <- deg %>%
         min_p = min(PVAL),
         combined_p = p.adjust(min(PVAL), method = "BH"),
         Direction = ifelse(mean_log2FC > 0, "UP", "DOWN"),
-        .groups = "drop")
+        .groups = "drop") # . references 
 
 #meta_disorder = core aggregated gene-level dataset 
 #collapses study-level differential expression results 
@@ -238,16 +237,14 @@ run_gsea <- function(disorder_name){
 gsea_results <- lapply(levels(meta_disorder$DISORDER), run_gsea)
 names(gsea_results) <- levels(meta_disorder$DISORDER)
 
-"""
-x-axis: ranked genes by log2FC
+# x-axis: ranked genes by log2FC
 
-vertical ticks: genes belonging to the pathway
+# vertical ticks: genes belonging to the pathway
 
-running score: enrichment signal across the ranked list
+#running score: enrichment signal across the ranked list
 
-Peak deviation indicates strongest enrichment.
+# 67Peak deviation indicates strongest enrichment.
 
-"""
 
 p_gsea1 <- gseaplot2(
     gsea_results[["AD"]],
