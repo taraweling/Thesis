@@ -1,152 +1,213 @@
-import csv
-import numpy as np
-from pyvis.network import Network 
-import networkx as nx
-import matplotlib.pyplot as plt
 import graph_utils as gu
-import graph_viz as gv 
-import graph_algos as ga 
-import json
-import py4cytoscape as pyc
-import pandas as pd
-import time # start = time.time(); multi_time = time.time()   start; print(f"Multi threaded:  {multi_time:.3f}s")
+import graph_viz as gv
+import graph_algos as ga
+
+RUN_TESTS = False
+TOP_DEGS = 20
 
 # INSTRUCTIONS: RUN WHILE IN SRC FOLDER
 def main():
-    
+
     # obtain adjlist for each disorder (handle in main or helper fn?)
     ## what information do I want in my graph?
     """
-    as a bipartite graph, node attribute should either be TF or gene. 
-    the TFs are DEGs and the target genes can be either DEGs or not differentially expressed genes in the GRAND regulatory network 
+    as a bipartite graph, node attribute should either be TF or gene.
+    the TFs are DEGs and the target genes can be either DEGs or not differentially expressed genes in the GRAND regulatory network
     """
-    
-    # test make_adjlist
-    #testadjlist = utils.make_adjlist('data/test.csv',0) # truong paper uses edge weight threshold of 0.7. 
-    # would this change since I'm merging 2 adjlists
-    #print(testadjlist)
-    
+
     # get the combined GRAND GRN (what check can I use?)
-    brainother = gu.make_adjlist('data/Brain_Other.csv',0.7) 
-    brainbg = gu.make_adjlist('data/Brain_Basal_Ganglia.csv',0.7)
+    brainother = gu.make_adjlist('data/Brain_Other.csv', 0.5)
+    brainbg = gu.make_adjlist('data/Brain_Basal_Ganglia.csv', 0.5)
 
-    # test merge_adjlist's weight averaging feature: AHR A1BG SHOULD have a weight of ~0.2
-    #testadjlist2 = {'AHR': [('A1BG', 0.0), ('A4GALT', 0.314864), ('AHR', 0.131604), ('ALX3', 0.208409)]}
-    #testmerge = utils.merge_adjlist(testadjlist,testadjlist2)
-    #print(testmerge,'\n')
-
-    # merge the two brain GRNs 
-    brains= gu.merge_adjlist(brainother, brainbg) # NOT WORKING 
+    # merge the two brain GRNs and test the merge behavior
+    brains = gu.merge_adjlist(brainother, brainbg)
+    if RUN_TESTS:
+        test_merge_adjlist(brainother, brainbg, brains)
     grn = gu.ensemblify(brains)
-    
-    """Get the first key
-    first_node = next(iter(brains))
-    print("non ensemble",first_node)"""
+    # run.py (right after ensemblify)
+    ensg_tfs = [tf for tf in grn if gu.ENSEMBL_ID_RE.match(tf)]
+    print("TFs mapped to ENSG:", len(ensg_tfs), "of", len(grn))
 
-    # should I do a bunch of stats calls on the merged brain grn to compare to individual?
-    
     # get adjlists per disorder by inputting the name of the disorder
-    ## (options = AD, ADHD, BD, SZ, MDD, OCD) and the file location, outputting a list of lists   
-    ad = gu.disorder_list('data/DEGData.csv','AD')
-    adhd = gu.disorder_list('data/DEGData.csv','ADHD')
-    asd = gu.disorder_list('data/DEGData.csv','ASD')
-    bd = gu.disorder_list('data/DEGData.csv','BD')
-    mdd = gu.disorder_list('data/DEGData.csv','MDD')
-    ocd = gu.disorder_list('data/DEGData.csv','OCD')
-    sz = gu.disorder_list('data/DEGData.csv','SZ')
+    ## (options = AD, ADHD, BD, SZ, MDD, OCD) and the file location, outputting a list of lists
+    disorders = ['AD', 'ADHD', 'ASD', 'BD', 'MDD', 'OCD', 'SZ']
+    data_path = 'data/DEGData.csv'
+    degs = {d: gu.disorder_list(data_path, d) for d in disorders}
 
-    # convert geneIDs in disorders list of lists to ENSEMBL IDs
-    addegs = gu.ensemblifylist(ad)
-    adhddegs = gu.ensemblifylist(adhd)
-    asddegs = gu.ensemblifylist(asd)
-    bddegs = gu.ensemblifylist(bd)
-    mdddegs = gu.ensemblifylist(mdd)
-    ocddegs = gu.ensemblifylist(ocd)
-    szdegs = gu.ensemblifylist(sz)
-    
-    #degset = {row[0] for row in degs} # location of DEG col in input chart
-    #print("deg first 10 keys:", list(degset)[:10])
-    #print("overlap:", len(set(grn) & degset)) = 79 for test
+    # per-disorder outputs
+    detf_deggrn_by_name = {}
+    tf_grn_by_name = {}
+    deg_grn_by_name = {}
+    detf_deggrn_edgelist_by_name = {}
+    reg_scores_by_name = {}
+    tf_regulators_by_name = {}
+    edgeweight_summary_by_name = {}
+    log2fc_summary_by_name = {}
+    summary_rows = []
+    deg_gene_sets = {}
+    detf_edge_sets = {}
+    study_sets = {}
+    tissue_sets = {}
+    year_sets = {}
 
-    # merge list of lists with brain grn, cutting the grn down to just the keys in disorders
-    """
-    1. de_grn_tfsonly preserves network topology and adds annotation (has detf regulating all genes). 
-    A transcription factor's expression is abnormal in a disorder, so its regulatory output may be altered. 
-    A TF that is upregulated or downregulated can shift expression of many genes that themselves are not significantly DE.
-    Common where a master regulator shifts subtly but downstream genes do not pass DEG thresholds.
-    Detects: regulatory amplification, TFs with unusually many DEG targets, TFs whose downstream genes shift collectively but weakly
-    fraction DEG per TF = (# DEG targets) / (# total targets): measures how strongly that TF's regulated genes overlaps with disease signal.
-    
-    2. de_grn_both performs two stage filtering, producing a smaller induced subgraph over DEG nodes (detf regulates deg)
-    Thus, identifying direct dysregulated regulatory cascades eg synaptic regulation, immune activation, chromatin modifiers
-    Gives small but highest confidence regulatory modules useful for pathway discovery, disease modules, candidate causal regulators
-    Limitation is that many regulatory effects are lost because DEG thresholds are harsh, 
-    brain tissue averages many cell types,
-    TF activity does not always correlate with TF expression
-    
-    3. de_grn_genesonly has tf regulating degs. TF activity changes without expression change.
-    post translational TF activation (phosphorylation), chromatin accessibility change, 
-    cofactor dependent TF activation, 
-    cell type composition changes    
-    """
-    
-    detfdeggrn = gu.de_grn_both(grn,degs) # produces grn of differential tfs AND differential gene targets
-    tfgrn = gu.de_grn_tfsonly(grn,degs) # produces grn of differential tfs only
-    deggrn = gu.de_grn_degsonly(grn,degs) # produces a grn of differential gene targets only
-    
-    print(ga.regulatory_scores(detfdeggrn))
-    # turn into edgelist
-    detfdeggrnedgelist = gu.adjlist2edgelist(detfdeggrn)
-        
-    # run stats from graph_algos here!
-    # check number of positive vs negative DETFs
-    # ga.edgeweight_summary()
-    # ga.edgeweight_summary(brains)
-    # ga.edgeweight_summary(grn)
-    # ga.edgeweight_summary(brainother)
-    # ga.edgeweight_summary(brainbg)
-    
-    ga.regulatory_scores(detfdeggrn)
-    bd1 = ga.regulator_detection(tfgrn,gu.disorder_list('data/DEGDataSample.csv','BD'))
-    bd2 = ga.edgeweight_summary(deggrn,gu.disorder_list('data/DEGDataSample.csv','BD'))
-    
-    ga.log2fc_summary(detfdeggrn)
-    ga.log2fc_summary(tfgrn)
-    ga.log2fc_summary(deggrn)
-    
-    """
-    A TF ranks highly when it regulates many DEGs, the edges have strong PANDA weights and those genes show large expression changes
-    = candidates for regulatory drivers of the disorder transcriptome.
-    
-    TFs with high normalized score regulate dense clusters of dysregulated genes.
-    """
-    
-    bddrivers = ga.regulator_detection(grn, gu.disorder_list('data/DEGDataSample.csv','BD'))
-    szdrivers = ga.regulator_detection(grn, gu.disorder_list('data/DEGDataSample.csv','SZ'))
-    bdszdrivers = ga.regulator_detection(grn, gu.disorder_list('data/DEGDataSample.csv','SZ','BD'))
-    
-    for r in bddrivers[:10]:
-        print(r,"\n")
-    
+    for name, data in degs.items():
+        if data is None:
+            continue
 
-    """G = nx.from_dict_of_lists(
-    {k: [x[0] for x in v] for k, v in deggrn.items()},
-    create_using=nx.DiGraph())"""
-    #nx.readwrite.json_graph.cytoscape_data(G)
-    #pyc.create_network_from_networkx(G, title="Test DEGs")
-    
-    
-    # visualize graph in new file
-    gv.viz_graph(detfdeggrnedgelist,'results/deggrn.html')
-    gv.visualize_deg_grn(detfdeggrn)
-    gv.pyviz_deggrn(detfdeggrn)
-    
-    ## later on, add variable that tracks the names of the disorders being indexed so I can create a file with that name
-                      
-    # calculate graph metrics (use an existing package?)
-    
-    return 
+        print("\n", "adjacency lists generated for", name)
+        data = gu.ensemblifylist(data)
+        degs[name] = data
+        print("\n", "ensemblified DEGs for", name)
+
+        degset = {row[0] for row in data}
+        print(name, "deg first 10 keys:", list(degset)[:10])
+        grn_tfs = set(grn.keys())
+        grn_nodes = set(grn_tfs)
+        for tf, edges in grn.items():
+            for gene, _ in edges:
+                grn_nodes.add(gene)
+        print(name, "overlap (TFs):", len(grn_tfs & degset))
+        print(name, "overlap (all GRN nodes):", len(grn_nodes & degset))
+
+        # build DEG-filtered GRNs per disorder
+        detf_deggrn = gu.de_grn_both(grn, data)  # DETFs and DEG targets
+        tf_grn = gu.de_grn_tfsonly(grn, data)    # DETFs only
+        deg_grn = gu.de_grn_degsonly(grn, data)  # DEG targets only
+
+        # store by disorder name
+        detf_deggrn_by_name[name] = detf_deggrn
+        tf_grn_by_name[name] = tf_grn
+        deg_grn_by_name[name] = deg_grn
+
+        # naming system for quick access (e.g., adhd_detf_deggrn)
+        globals()[f"{name.lower()}_detf_deggrn"] = detf_deggrn
+        globals()[f"{name.lower()}_tf_grn"] = tf_grn
+        globals()[f"{name.lower()}_deg_grn"] = deg_grn
+
+        # apply graph_algos to each disorder-specific GRN
+        reg_scores_by_name[name] = ga.regulatory_scores(detf_deggrn)
+        detf_deggrn_edgelist_by_name[name] = gu.adjlist2edgelist(detf_deggrn)
+        tf_regulators_by_name[name] = ga.regulator_detection(tf_grn, data)
+        edgeweight_summary_by_name[name] = ga.edgeweight_summary(grn, data)
+        log2fc_summary_by_name[name] = {
+            "detf_deggrn": ga.log2fc_summary(detf_deggrn),
+            "tf_grn": ga.log2fc_summary(tf_grn),
+            "deg_grn": ga.log2fc_summary(deg_grn),
+        }
+
+        # collect per-disorder summary row for CSV
+        summary_rows.append(
+            ga.disorder_summary_row(
+                name=name,
+                disorderlist=data,
+                detf_deggrn=detf_deggrn,
+                tf_grn=tf_grn,
+                deg_grn=deg_grn,
+                reg_scores=reg_scores_by_name[name],
+                tf_regulators=tf_regulators_by_name[name],
+                edgeweight_summary=edgeweight_summary_by_name[name],
+            )
+        )
+
+        # sets for pairwise Jaccard comparisons
+        deg_gene_sets[name] = {rec[0] for rec in data}
+        detf_edge_sets[name] = {
+            (tf, edge[0])
+            for tf, edges in detf_deggrn.items()
+            for edge in edges
+        }
+        study_sets[name] = {rec[2] for rec in data if len(rec) > 2}
+        tissue_sets[name] = {rec[4] for rec in data if len(rec) > 4}
+        year_sets[name] = {rec[3] for rec in data if len(rec) > 3}
+
+        def _edge_count(adj):
+            return sum(len(edges) for edges in adj.values())
+
+        def _top_regs(tf_scores, n=5):
+            if not tf_scores:
+                return "none"
+            return ", ".join(
+                f"{r['TF']}({r['driver_score']:.2f})"
+                for r in tf_scores[:n]
+            )
+
+        print(f"\n{name} summary stats:")
+        print(f"  detf_deggrn TFs={len(detf_deggrn)} edges={_edge_count(detf_deggrn)}")
+        print(f"  tf_grn TFs={len(tf_grn)} edges={_edge_count(tf_grn)}")
+        print(f"  deg_grn TFs={len(deg_grn)} edges={_edge_count(deg_grn)}")
+        print(f"  top DETF regulators: {_top_regs(reg_scores_by_name[name])}")
+        print(f"  top TF regulators: {_top_regs(tf_regulators_by_name[name])}")
+        print(f"  edgeweight summary: {edgeweight_summary_by_name[name]}")
+        print(f"  log2fc summary (detf_deggrn): {log2fc_summary_by_name[name]['detf_deggrn']}")
+        print(f"  log2fc summary (tf_grn): {log2fc_summary_by_name[name]['tf_grn']}")
+        print(f"  log2fc summary (deg_grn): {log2fc_summary_by_name[name]['deg_grn']}")
+
+    # visualize graphs per disorder
+    for name, detf_deggrn in detf_deggrn_by_name.items():
+        detf_deggrnedgelist = detf_deggrn_edgelist_by_name[name]
+        gv.viz_graph(
+            detf_deggrnedgelist,
+            f"results/deggrn_{name.lower()}.html",
+            top_degs=TOP_DEGS,
+        )
+        gv.pyviz_deggrn(
+            detf_deggrn,
+            outfile=f"results/pyviz_{name.lower()}.html",
+            top_degs=TOP_DEGS,
+        )
+
+    # write CSV comparisons
+    ga.write_csv(summary_rows, "results/deggrn_disorder_summary.csv")
+    ga.write_csv(
+        ga.pairwise_jaccard_rows(deg_gene_sets),
+        "results/deggrn_jaccard_deg_genes.csv",
+    )
+    ga.write_csv(
+        ga.pairwise_jaccard_rows(detf_edge_sets),
+        "results/deggrn_jaccard_detf_edges.csv",
+    )
+    ga.write_csv(
+        ga.pairwise_jaccard_rows(study_sets),
+        "results/deggrn_jaccard_studies.csv",
+    )
+    ga.write_csv(
+        ga.pairwise_jaccard_rows(tissue_sets),
+        "results/deggrn_jaccard_tissues.csv",
+    )
+    ga.write_csv(
+        ga.pairwise_jaccard_rows(year_sets),
+        "results/deggrn_jaccard_years.csv",
+    )
+
+
+def test_merge_adjlist(brainother, brainbg, brains):
+    def _edge_set(adj):
+        return {(tf, gene) for tf, edges in adj.items() for gene, _ in edges}
+
+    def _edge_weights(adj):
+        return {(tf, gene): w for tf, edges in adj.items() for gene, w in edges}
+
+    edges_other = _edge_set(brainother)
+    edges_bg = _edge_set(brainbg)
+    edges_merged = _edge_set(brains)
+
+    # 1) merged contains all edges from both inputs
+    assert edges_other.issubset(edges_merged)
+    assert edges_bg.issubset(edges_merged)
+    assert edges_merged == edges_other | edges_bg
+
+    # 2) overlap is on edges (TF, Gene), not just TF keys
+    edge_overlap = edges_other & edges_bg
+    print("merge successful", "brain grn edge overlap:", len(edge_overlap))
+
+    # 3) merged weights are averaged for overlapping edges (spot check one)
+    if edge_overlap:
+        sample = next(iter(edge_overlap))
+        w1 = _edge_weights(brainother)[sample]
+        w2 = _edge_weights(brainbg)[sample]
+        wm = _edge_weights(brains)[sample]
+        assert abs(wm - ((w1 + w2) / 2)) < 1e-9
+
 
 if __name__ == '__main__':
     main()
-

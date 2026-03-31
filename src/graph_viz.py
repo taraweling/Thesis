@@ -1,11 +1,5 @@
 import matplotlib.pyplot as plt
 from pyvis.network import Network
-import networkx as nx
-import numpy as np
-import graph_algos as ga
-import graph_utils as gu
-import json
-import py4cytoscape as pyc
 import math
 
 # All functions now assume edgelist rows look like:
@@ -16,10 +10,148 @@ import math
 ## MUST FIGURE OUT A WAY TO VISUALIZE ONLY THE GENES THAT THE MOST TFS POINT TO 
 
 #  returns graph of the most differentally expressed TFs 
-def regulon_viz(adjlist, outfile ="regulon.html"): 
-    return
+def regulon_viz(adjlist, outfile ="regulon.html", top_tfs=20, top_genes_by_tfs=None, directed=True): 
+    # rank tfs by mean |log2fc| of their targets
+    adjlist = _top_tfs_by_abs_log2fc_adjlist(adjlist, top_tfs)
+    # keep genes hit by the most tfs
+    adjlist = _top_genes_by_tfs_adjlist(adjlist, top_genes_by_tfs)
+    return pyviz_deggrn(adjlist, outfile=outfile, directed=directed)
     
-def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make not directed so it resembles a co expression net
+def _top_tfs_adjlist(adjlist, top_tfs):
+    if top_tfs is None:
+        return adjlist
+
+    tf_scores = {}
+    for tf, edges in adjlist.items():
+        targets = set()
+        for edge in edges:
+            if isinstance(edge, (list, tuple)):
+                targets.add(edge[0])
+            else:
+                targets.add(edge)
+        tf_scores[tf] = len(targets)
+
+    top = sorted(tf_scores, key=tf_scores.get, reverse=True)[:top_tfs]
+    return {tf: adjlist[tf] for tf in top}
+
+def _top_tfs_by_abs_log2fc_adjlist(adjlist, top_tfs):
+    if top_tfs is None:
+        return adjlist
+
+    tf_scores = {}
+    for tf, edges in adjlist.items():
+        fcs = []
+        targets = set()
+        for edge in edges:
+            if isinstance(edge, (list, tuple)):
+                targets.add(edge[0])
+                if len(edge) > 7 and edge[7] is not None:
+                    try:
+                        fcs.append(abs(float(edge[7])))
+                    except (TypeError, ValueError):
+                        pass
+            else:
+                targets.add(edge)
+        if fcs:
+            tf_scores[tf] = sum(fcs) / len(fcs)
+        else:
+            tf_scores[tf] = len(targets)
+
+    top = sorted(tf_scores, key=tf_scores.get, reverse=True)[:top_tfs]
+    return {tf: adjlist[tf] for tf in top}
+
+def _top_genes_by_tfs_adjlist(adjlist, top_genes):
+    if top_genes is None:
+        return adjlist
+
+    gene_to_tfs = {}
+    for tf, edges in adjlist.items():
+        for edge in edges:
+            gene = edge[0] if isinstance(edge, (list, tuple)) else edge
+            gene_to_tfs.setdefault(gene, set()).add(tf)
+
+    top = sorted(gene_to_tfs, key=lambda g: len(gene_to_tfs[g]), reverse=True)[:top_genes]
+    keep = set(top)
+
+    filtered = {}
+    for tf, edges in adjlist.items():
+        kept_edges = []
+        for edge in edges:
+            gene = edge[0] if isinstance(edge, (list, tuple)) else edge
+            if gene in keep:
+                kept_edges.append(edge)
+        if kept_edges:
+            filtered[tf] = kept_edges
+    return filtered
+
+def _top_degs_adjlist(adjlist, top_degs):
+    if top_degs is None:
+        return adjlist
+
+    # Rank genes by |log2fc| desc, then pval asc (best evidence across edges)
+    gene_best = {}
+    for tf, edges in adjlist.items():
+        for edge in edges:
+            gene = edge[0] if isinstance(edge, (list, tuple)) else edge
+            log2fc = edge[7] if isinstance(edge, (list, tuple)) and len(edge) > 7 else None
+            pval = edge[8] if isinstance(edge, (list, tuple)) and len(edge) > 8 else None
+
+            abs_log2fc = abs(log2fc) if log2fc is not None else 0.0
+            pval_score = pval if pval is not None else float("inf")
+            score = (-abs_log2fc, pval_score)
+
+            if gene not in gene_best or score < gene_best[gene]:
+                gene_best[gene] = score
+
+    top = sorted(gene_best, key=gene_best.get)[:top_degs]
+    keep = set(top)
+    filtered = {}
+    for tf, edges in adjlist.items():
+        kept_edges = []
+        for edge in edges:
+            gene = edge[0] if isinstance(edge, (list, tuple)) else edge
+            if gene in keep:
+                kept_edges.append(edge)
+        if kept_edges:
+            filtered[tf] = kept_edges
+    return filtered
+
+def _top_degs_edgelist(edgelist, top_degs):
+    if top_degs is None:
+        return edgelist
+
+    gene_best = {}
+    for row in edgelist:
+        gene = row[1]
+        log2fc = row[7] if len(row) > 7 else None
+        pval = row[8] if len(row) > 8 else None
+
+        abs_log2fc = abs(log2fc) if log2fc is not None else 0.0
+        pval_score = pval if pval is not None else float("inf")
+        score = (-abs_log2fc, pval_score)
+
+        if gene not in gene_best or score < gene_best[gene]:
+            gene_best[gene] = score
+
+    top = sorted(gene_best, key=gene_best.get)[:top_degs]
+    keep = set(top)
+    return [row for row in edgelist if row[1] in keep]
+
+def _top_genes_by_tfs_edgelist(edgelist, top_genes):
+    if top_genes is None:
+        return edgelist
+
+    gene_to_tfs = {}
+    for row in edgelist:
+        tf = row[0]
+        gene = row[1]
+        gene_to_tfs.setdefault(gene, set()).add(tf)
+
+    top = sorted(gene_to_tfs, key=lambda g: len(gene_to_tfs[g]), reverse=True)[:top_genes]
+    keep = set(top)
+    return [row for row in edgelist if row[1] in keep]
+
+def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_degs=None, top_genes_by_tfs=None): # option to make not directed so it resembles a co expression net
     """
     Visualize a Gene Regulatory Network (GRN) stored as an adjacency list.
 
@@ -47,8 +179,15 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make n
           Gene nodes   > circle
           Node size    >  log10(pval)
           Node color   > log2fc (red up / blue down)
+    Filtering:
+          top_tfs  > keep TFs with most unique targets
+          top_degs > keep genes with largest |log2fc|, then lowest pval
+          top_genes_by_tfs > keep genes with most TF regulators
     """
 
+    adjlist = _top_tfs_adjlist(adjlist, top_tfs)
+    adjlist = _top_degs_adjlist(adjlist, top_degs)
+    adjlist = _top_genes_by_tfs_adjlist(adjlist, top_genes_by_tfs)
     G = Network(directed=directed)
 
     # Collect node metadata
@@ -80,7 +219,8 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make n
         # size from p value
         size = 20
         if info.get("pval") is not None and info["pval"] > 0:
-            size = min(60, 10 + ( math.log10(info["pval"]) * 6)) # what does this do
+            size = 10 + (-math.log10(info["pval"]) * 6)
+            size = max(8, min(60, size))
 
         # color from log2fc
         color = "#cccccc"
@@ -107,127 +247,16 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True): # option to make n
             G.add_edge(tf, gene, value=weight)
 
     # Write output
+    if len(G.edges) == 0:
+        print("Warning: pyviz_deggrn has no edges to render.")
+        return
 
     G.toggle_physics(True)
     G.show_buttons(filter_=["physics"])
     G.write_html(outfile)
     return 
 
-def visualize_deg_grn(adjlist, min_pval=None, min_abs_log2fc=None, max_abs_log2fc=None, max_edges=1000, seed=0):
-    """
-    Visualize a DEG GRN adjacency list.
-
-    adjlist format:
-    {
-        TF: [
-            (Gene, disorder, study, year, tissue, log2fc, pval),
-            ...
-        ]
-    }
-
-    Filters:
-        min_weight      = drop weak GRN edges
-        max_pval        = drop nonsignificant DEGs
-        min_abs_log2fc  = drop weak expression changes
-        max_edges       = take random edges if still huge
-    """
-
-    G = nx.DiGraph()
-
-    # Build graph with filters
-
-    for tf, edges in adjlist.items():
-        #print(list(edges)[:10])
-        #for gene, dis, study, year, tissue, lfc, pval in edges:
-        for gene in edges:
-        #for gene, w, dis, study, year, tissue, lfc, pval in edges:     
-            # if min_pval is not None and pval > min_pval:
-            #     continue
-
-            #     continue
-            
-            # if max_abs_log2fc is not None and lfc > max_abs_log2fc:
-            #     continue
-
-            G.add_edge(
-                tf,
-                gene,
-                #weight=w,
-                # disorder=dis,
-                # study=study,
-                # year=year,
-                # tissue=tissue,
-                # log2fc=lfc,
-                # pval=pval,
-            )
-
-    # Downsample if enormous
-
-    if G.number_of_edges() > max_edges:
-         import random
-         random.seed(seed)
-
-         edges = list(G.edges(data=True))
-         keep = random.sample(edges, max_edges)
-
-         G2 = nx.DiGraph()
-         for u, v, d in keep:
-             G2.add_edge(u, v, **d)
-
-         G = G2
-
-    # Layout
-
-    pos = nx.spring_layout(G, seed=seed, k=1.2)
-
-    # TF nodes = sources
-    tfs = set(adjlist.keys())
-    tf_nodes = [n for n in G.nodes if n in tfs]
-    gene_nodes = [n for n in G.nodes if n not in tfs]
-
-    # Draw
-    plt.figure(figsize=(24, 22))
-
-    nx.draw_networkx_nodes(
-        G,
-        pos,
-        nodelist=tf_nodes,
-        node_shape="^",
-        node_size=200,
-        label="TFs",
-    )
-
-    nx.draw_networkx_nodes(
-        G,
-        pos,
-        nodelist=gene_nodes,
-        node_shape="o",
-        node_size=200,
-        label="Targets",
-    )
-
-    nx.draw_networkx_edges(
-        G,
-        pos,
-        arrows=True,
-        alpha=0.5,
-        width=1,
-    )
-
-    #nx.draw_networkx_labels(G, pos, font_size=4)
-
-    plt.title(
-        f"DEG–GRN network\nNodes={G.number_of_nodes()} Edges={G.number_of_edges()}"
-    )
-
-    #plt.legend()
-    plt.axis("off")
-    plt.tight_layout()
-    plt.savefig('results/grn.png')
-    plt.show()
-    return
-
-def viz_graph(edgelist, outfile): # constructed using anna ritz's course assignment as inspiration
+def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None, top_genes_by_tfs=None): # constructed using anna ritz's course assignment as inspiration
     """
     Visualize a directed graph from an enriched edgelist and write it to an HTML file.
 
@@ -241,7 +270,21 @@ def viz_graph(edgelist, outfile): # constructed using anna ritz's course assignm
           Node size    >  log10(pval)
           Node outline color  > disorder
           Node fill color  > log2fc (red up / blue down)
+    Filtering:
+          top_tfs  > keep TFs with most targets
+          top_degs > keep genes with largest |log2fc|, then lowest pval
+          top_genes_by_tfs > keep genes with most TF regulators
     """
+
+    if top_tfs is not None:
+        tf_counts = {}
+        for row in edgelist:
+            tf = row[0]
+            tf_counts[tf] = tf_counts.get(tf, 0) + 1
+        top = set(sorted(tf_counts, key=tf_counts.get, reverse=True)[:top_tfs])
+        edgelist = [row for row in edgelist if row[0] in top]
+    edgelist = _top_degs_edgelist(edgelist, top_degs)
+    edgelist = _top_genes_by_tfs_edgelist(edgelist, top_genes_by_tfs)
 
     G = Network(directed=True)
 
@@ -292,7 +335,8 @@ def viz_graph(edgelist, outfile): # constructed using anna ritz's course assignm
         size = 20
         if info["pval"] is not None and info["pval"] > 0:
             import math
-            size = min(60, 10 + ( math.log10(info["pval"]) * 6))
+            size = 10 + (-math.log10(info["pval"]) * 6)
+            size = max(8, min(60, size))
 
         # fill color from log2fc
         fill = "#cccccc"
@@ -326,40 +370,9 @@ def viz_graph(edgelist, outfile): # constructed using anna ritz's course assignm
         G.add_edge(tf, gene, value=weight)
 
     # Output
-    G.toggle_physics(True)
-    G.show_buttons(filter_=["physics"])
-    G.write_html(outfile)
-
-def old_viz_graph(edgelist, outfile):
-    """
-    Visualize a directed graph represented as an enriched edgelist
-    and write it to an HTML file.
-
-    Input rows:
-        [TF, Gene, weight, ...metadata...]
-
-    Only TF  > Gene is used for topology.
-    Weight is optionally used to scale edge width.
-    """
-
-    G = Network(directed=True)
-
-    nodes = set()
-    for row in edgelist:
-        u = row[0]
-        v = row[1]
-        nodes.add(u)
-        nodes.add(v)
-
-    for n in nodes:
-        G.add_node(n, label=n, color="#FFFFFF")
-
-    for row in edgelist:
-        u = row[0]
-        v = row[1]
-        weight = row[2] if len(row) >= 3 else 1.0
-        G.add_edge(u, v, value=abs(weight))
-
+    if len(G.edges) == 0:
+        print("Warning: viz_graph has no edges to render.")
+        return
     G.toggle_physics(True)
     G.show_buttons(filter_=["physics"])
     G.write_html(outfile)

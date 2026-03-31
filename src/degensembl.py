@@ -6,7 +6,7 @@ ENSEMBL_REST = "https://rest.ensembl.org"
 HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 
 input_file = "data/degsensembl.csv"
-output_file = "data/degsensemblfinal.csv"
+output_file = "data/degsensemblfinal_deggrn.csv"
 
 
 def normalize_gene(g):

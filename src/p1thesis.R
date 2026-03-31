@@ -555,10 +555,13 @@ fisher_pair <- function(d1, d2){
         odds_ratio = ft$estimate,
         log10_p = -log10(ft$p.value))} # take log to prevent extremely small p value
 
-# run fisher for every disorder pair
+# run fisher for disorder pairs (focus disorder vs others)
 disorders <- unique(meta_disorder$DISORDER)
+focus_disorder <- "AD"
+pair_disorders <- setdiff(disorders, focus_disorder)
 
-pairs <- combn(disorders, 2, simplify = FALSE)
+pairs <- lapply(pair_disorders, function(d){
+    c(focus_disorder, d)})
 
 fisher_results <- lapply(pairs, function(pair){
     
@@ -580,29 +583,31 @@ write.csv(fisher_df,"results/tables/fisher_pairwise.csv",row.names = FALSE)
 
 # VISUALIZE FISHER (log p value should be 100-150)
 
-# create matrix
+# create matrix (focus disorder only)
 disorders <- unique(meta_disorder$DISORDER)
+focus_disorder <- "AD"
+pair_disorders <- setdiff(disorders, focus_disorder)
 
-mat <- matrix(NA, length(disorders), length(disorders))
-rownames(mat) <- disorders
-colnames(mat) <- disorders
+mat <- matrix(0, 1, length(pair_disorders))
+rownames(mat) <- focus_disorder
+colnames(mat) <- pair_disorders
 
 for(i in 1:nrow(fisher_df)){
     
     d1 <- fisher_df$disorder1[i]
     d2 <- fisher_df$disorder2[i]
     
-    mat[d1, d2] <- fisher_df$log10_p[i]
-    mat[d2, d1] <- fisher_df$log10_p[i]}
-
-diag(mat) <- 0
+    if(d1 == focus_disorder){
+        mat[focus_disorder, d2] <- fisher_df$log10_p[i]}
+    if(d2 == focus_disorder){
+        mat[focus_disorder, d1] <- fisher_df$log10_p[i]}}
 
 png("results/figures/fisher_overlap_heatmap.png", width=2000, height=2000, res=300)
 
 Heatmap(
     mat,
     name = "-log10(p)",
-    cluster_rows = TRUE,
+    cluster_rows = FALSE,
     cluster_columns = TRUE)
 
 dev.off()
@@ -823,21 +828,22 @@ Heatmap(
 # 18. Jaccard Similarity Heatmap Between Disorders
 
 disorders <- levels(meta_disorder$DISORDER)
+focus_disorder <- "AD"
+pair_disorders <- setdiff(disorders, focus_disorder)
 
-jmat <- matrix(0, length(disorders), length(disorders))
-rownames(jmat) <- disorders
-colnames(jmat) <- disorders
+jmat <- matrix(0, 1, length(pair_disorders))
+rownames(jmat) <- focus_disorder
+colnames(jmat) <- pair_disorders
 
-for(i in 1:length(disorders)){
-    for(j in 1:length(disorders)){
-        g1 <- presence_matrix[[disorders[i]]]
-        g2 <- presence_matrix[[disorders[j]]]
-        jmat[i,j] <- calc_jaccard(g1, g2)}}
+for(j in 1:length(pair_disorders)){
+    g1 <- presence_matrix[[focus_disorder]]
+    g2 <- presence_matrix[[pair_disorders[j]]]
+    jmat[1, j] <- calc_jaccard(g1, g2)}
 
 Heatmap(
     jmat,
     name = "Jaccard",
-    cluster_rows = TRUE,
+    cluster_rows = FALSE,
     cluster_columns = TRUE)
 
 write.csv(jmat,
@@ -1068,4 +1074,3 @@ write.csv(global_effect,
           "results/tables/global_meta_effects.csv",
           row.names = FALSE)
 dim(global_effect)
-

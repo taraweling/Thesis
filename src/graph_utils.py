@@ -8,7 +8,10 @@ import numpy as np
 ## eg {AHR:[(A1BG,0.47),(A1CF, 0.89)]..., AIRE:[(x,y),(a,b)]}
 
 ENSEMBL_REST = "https://rest.ensembl.org"
-HEADERS = {"Content Type": "application/json"}
+HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+}
 
 ENSEMBL_ID_RE = re.compile(r"^ENSG\d+$")
 LOC_RE = re.compile(r"(chr)?(\w+):(\d+) (\d+)") # regex
@@ -76,13 +79,70 @@ def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion
     data = r.json()
     return data.get("id")
         
-def ensembl2gene(query:str | None): # bulk or not? needed for turning results into common names before 
-    
-    
-    # returns a gene ID for any ensembl sequence
-    
-    return 
+def ensembl2gene(query:str | None):
+    # returns a gene symbol (hgnc) for any ensembl sequence. use for visualizing
+
+    if query is None:
+        return None
+
+    query = query.strip()
+    if not query:
+        return None
+
+    # Case 1: Chromosomal location
+    loc_match = re.match(r"(chr)?(\w+):(\d+) (\d+)", query)
+    if loc_match:
+        chrom = loc_match.group(2)
+        start = loc_match.group(3)
+        end = loc_match.group(4)
+
+        url = f"{ENSEMBL_REST}/overlap/region/human/{chrom}:{start} {end}"
+        params = {"feature": "gene"}
+
+        r = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        if not r.ok:
+            return None
+
+        genes = r.json()
+        if not genes:
+            return None
+
+        # Return the first overlapping gene name if available
+        return genes[0].get("external_name") or genes[0].get("id")
+
+    # Case 2: XLOC
+    if re.match(r"XLOC_\d+", query):
+        url = f"{ENSEMBL_REST}/xrefs/symbol/homo_sapiens/{query}"
+
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        if not r.ok:
+            return None
+
+        xrefs = r.json()
+        for x in xrefs:
+            if x.get("type") == "gene":
+                gene_id = x.get("id")
+                if not gene_id:
+                    continue
+                lookup = requests.get(f"{ENSEMBL_REST}/lookup/id/{gene_id}", headers=HEADERS, timeout=10)
+                if not lookup.ok:
+                    return gene_id
+                data = lookup.json()
+                return data.get("display_name") or data.get("external_name") or gene_id
+        return None
+
+    # Case 3: Ensembl ID (or other stable ID)
+    url = f"{ENSEMBL_REST}/lookup/id/{query}"
+
+    r = requests.get(url, headers=HEADERS, timeout=10)
+    if not r.ok:
+        return None
+
+    data = r.json()
+    return data.get("display_name") or data.get("external_name") or data.get("id")
+
 # underscores at start of fn name = internal helpers
+
 def _extract_gene_strings(genedict):
     """
     Collect all *gene like* strings appearing as dict keys or as first
@@ -125,7 +185,7 @@ def _bulk_symbol_lookup(symbols):
 def _resolve_special_cases(queries):
     """
     Handle location based queries and XLOC identifiers individually.
-    These cannot be bulk resolved via the symbol endpoint.
+    These cannot be bulk resolved.
     """
     resolved = {}
 
@@ -173,7 +233,7 @@ def ensemblify(genedict):
     ensg = {g for g in genes if ENSEMBL_ID_RE.match(g)}
     locs = {g for g in genes if LOC_RE.match(g)}
     xlocs = {g for g in genes if XLOC_RE.match(g)}
-    symbols = genes   ensg   locs   xlocs
+    symbols = genes - ensg - locs - xlocs
 
     # 3. resolve
     mapping = {}
@@ -215,7 +275,7 @@ def ensemblifylist(disorderlist):
     ensg = {g for g in genes if ENSEMBL_ID_RE.match(g)}
     locs = {g for g in genes if LOC_RE.match(g)}
     xlocs = {g for g in genes if XLOC_RE.match(g)}
-    symbols = genes   ensg   locs   xlocs
+    symbols = genes - ensg - locs - xlocs
     
     # make names consistent
     mapping = {}

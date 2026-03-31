@@ -4,6 +4,54 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 
+# -----------------------------
+# Helpers
+# -----------------------------
+
+def _extract_deg_genes(degset):
+    """
+    Normalize DEG inputs into a set of gene IDs.
+
+    Accepts:
+      - set/iterable of gene strings
+      - list of DEG records (gene in index 0)
+      - dict keyed by gene
+    """
+    if degset is None:
+        return set()
+
+    # dict: keys are genes
+    if isinstance(degset, dict):
+        return set(degset.keys())
+
+    # set/tuple/list of strings OR records
+    try:
+        degset_iter = list(degset)
+    except TypeError:
+        return set()
+
+    if not degset_iter:
+        return set()
+
+    first = degset_iter[0]
+    if isinstance(first, str):
+        return set(degset_iter)
+
+    if isinstance(first, (list, tuple)) and first:
+        return {rec[0] for rec in degset_iter if rec}
+
+    return set()
+
+def _edge_log2fc_vals(edge, gene, gene_to_disorders):
+    """
+    Return log2fc values for a given edge. Prefer edge metadata if present.
+    """
+    if isinstance(edge, (list, tuple)) and len(edge) > 6:
+        return [edge[6]]
+    if gene_to_disorders is None:
+        return []
+    return [info[4] for info in gene_to_disorders.get(gene, [])]
+
 # use below fns on deg_grn_both to return tf_scores
 def regulatory_scores(deg_grn):
 
@@ -53,7 +101,7 @@ def regulatory_scores(deg_grn):
 ###################
 # use below fns on deg_grn_tfsonly. 
 
-def regulator_detection(grn, disorderlist): # outputs tf_results but loses information on sign of regulation.
+def regulator_detection(grn, disorderlist=None): # outputs tf_results but loses information on sign of regulation.
 
     """
     Identify TFs whose high weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
@@ -62,18 +110,19 @@ def regulator_detection(grn, disorderlist): # outputs tf_results but loses infor
     = estimates how strongly a transcription factor's regulatory edges align with observed expression changes.
     aka total regulatory influence of a TF over the disease transcriptome
     
+    If edges already carry DEG metadata (log2fc at index 6), those values are used directly.
+
     Output: {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
     """
     
-    # Build gene: disorder metadata dictionary
-    gene_to_disorders = {}
-
-    for rec in disorderlist:
-        gene_id = rec[0]
-        info = tuple(rec[1:])
-        gene_to_disorders.setdefault(gene_id, []).append(info)
-
-    degset = set(gene_to_disorders.keys())
+    # Build gene: disorder metadata dictionary (only if needed)
+    gene_to_disorders = None
+    if disorderlist is not None:
+        gene_to_disorders = {}
+        for rec in disorderlist:
+            gene_id = rec[0]
+            info = tuple(rec[1:])
+            gene_to_disorders.setdefault(gene_id, []).append(info)
 
     tf_results = []
 
@@ -88,14 +137,14 @@ def regulator_detection(grn, disorderlist): # outputs tf_results but loses infor
             gene = edge[0]
             weight = edge[1]
             total_targets += 1
-            
-            if gene not in degset:
+
+            log2fc_vals = _edge_log2fc_vals(edge, gene, gene_to_disorders)
+            if not log2fc_vals:
                 continue
 
             deg_targets += 1
 
-            for disorder_info in gene_to_disorders[gene]:
-                log2fc = disorder_info[4]
+            for log2fc in log2fc_vals:
                 score += weight * abs(log2fc)
                 log2fcs.append(log2fc)
                 
@@ -114,11 +163,11 @@ def regulator_detection(grn, disorderlist): # outputs tf_results but loses infor
             "normalized_score": normalized_score, # = average influence per target
             "mean_target_log2fc": mean_fc})
     
-        tf_results.sort(key=lambda x: x["driver_score"], reverse=True)
+    tf_results.sort(key=lambda x: x["driver_score"], reverse=True)
 
     return tf_results
 
-def signed_regulator_detection(grn, disorderlist): # outputs tf_results. better than the last!
+def signed_regulator_detection(grn, disorderlist=None): # outputs tf_results. better than the last!
 
     """
     Detect regulatory drivers while preserving direction metadata.
@@ -129,17 +178,18 @@ def signed_regulator_detection(grn, disorderlist): # outputs tf_results. better 
     = estimates how strongly a transcription factor's regulatory edges align with observed expression changes.
     aka total regulatory influence of a TF over the disease transcriptome
     
+    If edges already carry DEG metadata (log2fc at index 6), those values are used directly.
+
     Output: {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
     """
 
-    gene_to_disorders = {}
-
-    for rec in disorderlist:
-        gene_id = rec[0]
-        info = tuple(rec[1:])
-        gene_to_disorders.setdefault(gene_id, []).append(info)
-
-    deg_set = set(gene_to_disorders.keys())
+    gene_to_disorders = None
+    if disorderlist is not None:
+        gene_to_disorders = {}
+        for rec in disorderlist:
+            gene_id = rec[0]
+            info = tuple(rec[1:])
+            gene_to_disorders.setdefault(gene_id, []).append(info)
 
     tf_results = []
 
@@ -162,13 +212,11 @@ def signed_regulator_detection(grn, disorderlist): # outputs tf_results. better 
             
             total_targets += 1
 
-            if gene not in deg_set:
+            log2fc_vals = _edge_log2fc_vals(edge, gene, gene_to_disorders)
+            if not log2fc_vals:
                 continue
 
-            for disorder_info in gene_to_disorders[gene]:
-
-                log2fc = disorder_info[4]
-
+            for log2fc in log2fc_vals:
                 driver_score += weight * abs(log2fc)
                 direction_score += weight * log2fc
 
@@ -320,14 +368,14 @@ def edgeweight_summary(grn, degset):
                   {TF: [(target, weight), ...]}
 
         deg_set : set of differentially expressed genes
+                  OR list of DEG records (gene in column 0)
 
     Output
         dictionary summarizing edge weight statistics
     """
 
     tf_set = set(grn.keys()) 
-    deg = {element[0]: element[1] for element in degset} # builds dict of only the gene id and edge weight
-    deg_set = set(deg.keys()) 
+    deg_set = _extract_deg_genes(degset)
     detf_set = tf_set & deg_set
     print("detfs",(list(detf_set)[:10]),list(deg_set)[:10])
 
@@ -499,6 +547,341 @@ def log2fc_summary(adjlist): # used chatgpt to fix previous function
 
     return summary
 
+# -----------------------------
+# CSV-friendly summaries
+# -----------------------------
+
+def _safe_mean(vals):
+    return sum(vals) / len(vals) if vals else 0
+
+def _safe_median(vals):
+    return float(np.median(vals)) if vals else 0
+
+def deglist_stats(disorderlist):
+    """
+    Compute basic stats from a disorder list:
+      [GENEID, DISORDER, STUDY, YEAR, TISSUE, LOG2FC, PVAL]
+    """
+    if not disorderlist:
+        return {
+            "records": 0,
+            "unique_genes": 0,
+            "mean_log2fc": 0,
+            "median_log2fc": 0,
+            "mean_abs_log2fc": 0,
+            "mean_pval": 0,
+            "median_pval": 0,
+            "frac_pval_lt_0_05": 0,
+            "pos": 0,
+            "neg": 0,
+            "zero": 0,
+            "frac_pos": 0,
+            "frac_neg": 0,
+            "unique_studies": 0,
+            "unique_tissues": 0,
+            "unique_years": 0,
+            "year_min": 0,
+            "year_max": 0,
+            "year_mean": 0,
+            "top_study": "",
+            "top_study_count": 0,
+            "top_tissue": "",
+            "top_tissue_count": 0,
+        }
+
+    genes = [rec[0] for rec in disorderlist if rec]
+    log2fcs = [rec[5] for rec in disorderlist if len(rec) > 5]
+    pvals = [rec[6] for rec in disorderlist if len(rec) > 6]
+    studies = [rec[2] for rec in disorderlist if len(rec) > 2]
+    years = [rec[3] for rec in disorderlist if len(rec) > 3]
+    tissues = [rec[4] for rec in disorderlist if len(rec) > 4]
+
+    pos = sum(1 for v in log2fcs if v > 0)
+    neg = sum(1 for v in log2fcs if v < 0)
+    zero = sum(1 for v in log2fcs if v == 0)
+    total = len(log2fcs)
+
+    # most common metadata
+    top_study = ""
+    top_study_count = 0
+    if studies:
+        counts = {}
+        for s in studies:
+            counts[s] = counts.get(s, 0) + 1
+        top_study = max(counts, key=counts.get)
+        top_study_count = counts[top_study]
+
+    top_tissue = ""
+    top_tissue_count = 0
+    if tissues:
+        counts = {}
+        for t in tissues:
+            counts[t] = counts.get(t, 0) + 1
+        top_tissue = max(counts, key=counts.get)
+        top_tissue_count = counts[top_tissue]
+
+    return {
+        "records": len(disorderlist),
+        "unique_genes": len(set(genes)),
+        "mean_log2fc": _safe_mean(log2fcs),
+        "median_log2fc": _safe_median(log2fcs),
+        "mean_abs_log2fc": _safe_mean([abs(v) for v in log2fcs]),
+        "mean_pval": _safe_mean(pvals),
+        "median_pval": _safe_median(pvals),
+        "frac_pval_lt_0_05": (sum(1 for v in pvals if v < 0.05) / len(pvals)) if pvals else 0,
+        "pos": pos,
+        "neg": neg,
+        "zero": zero,
+        "frac_pos": pos / total if total else 0,
+        "frac_neg": neg / total if total else 0,
+        "unique_studies": len(set(studies)),
+        "unique_tissues": len(set(tissues)),
+        "unique_years": len(set(years)),
+        "year_min": min(years) if years else 0,
+        "year_max": max(years) if years else 0,
+        "year_mean": _safe_mean(years),
+        "top_study": top_study,
+        "top_study_count": top_study_count,
+        "top_tissue": top_tissue,
+        "top_tissue_count": top_tissue_count,
+    }
+
+def adjlist_stats(adjlist):
+    """
+    Compute basic graph stats from an adjacency list.
+    Supports both simple edges (gene, weight) and annotated edges.
+    """
+    if not adjlist:
+        return {
+            "tfs": 0,
+            "genes": 0,
+            "nodes": 0,
+            "edge_rows": 0,
+            "unique_edges": 0,
+            "density": 0,
+            "avg_out_degree": 0,
+            "avg_in_degree": 0,
+            "mean_weight": 0,
+            "median_weight": 0,
+            "mean_abs_log2fc": 0,
+            "frac_up_log2fc": 0,
+            "frac_down_log2fc": 0,
+        }
+
+    tfs = set(adjlist.keys())
+    genes = set()
+    weights = []
+    log2fcs = []
+    edge_rows = 0
+    unique_edges = set()
+
+    for tf, edges in adjlist.items():
+        for edge in edges:
+            if isinstance(edge, (list, tuple)):
+                gene = edge[0]
+                genes.add(gene)
+                unique_edges.add((tf, gene))
+                edge_rows += 1
+
+                if len(edge) > 1:
+                    try:
+                        weights.append(float(edge[1]))
+                    except (TypeError, ValueError):
+                        pass
+
+                if len(edge) > 6:
+                    try:
+                        log2fcs.append(float(edge[6]))
+                    except (TypeError, ValueError):
+                        pass
+            else:
+                genes.add(edge)
+                unique_edges.add((tf, edge))
+                edge_rows += 1
+
+    nodes = tfs | genes
+    n_tfs = len(tfs)
+    n_genes = len(genes)
+    unique_edge_count = len(unique_edges)
+
+    density = unique_edge_count / (n_tfs * n_genes) if n_tfs and n_genes else 0
+    avg_out = unique_edge_count / n_tfs if n_tfs else 0
+    avg_in = unique_edge_count / n_genes if n_genes else 0
+
+    pos = sum(1 for v in log2fcs if v > 0)
+    neg = sum(1 for v in log2fcs if v < 0)
+    total = len(log2fcs)
+
+    return {
+        "tfs": n_tfs,
+        "genes": n_genes,
+        "nodes": len(nodes),
+        "edge_rows": edge_rows,
+        "unique_edges": unique_edge_count,
+        "density": density,
+        "avg_out_degree": avg_out,
+        "avg_in_degree": avg_in,
+        "mean_weight": _safe_mean(weights),
+        "median_weight": _safe_median(weights),
+        "mean_abs_log2fc": _safe_mean([abs(v) for v in log2fcs]),
+        "frac_up_log2fc": pos / total if total else 0,
+        "frac_down_log2fc": neg / total if total else 0,
+    }
+
+def disorder_summary_row(
+    name,
+    disorderlist,
+    detf_deggrn=None,
+    tf_grn=None,
+    deg_grn=None,
+    reg_scores=None,
+    tf_regulators=None,
+    edgeweight_summary=None,
+):
+    """
+    Build a single CSV-ready summary row for one disorder.
+    """
+    deg_stats = deglist_stats(disorderlist)
+
+    row = {
+        "disorder": name,
+        "deg_records": deg_stats["records"],
+        "deg_unique_genes": deg_stats["unique_genes"],
+        "deg_mean_log2fc": deg_stats["mean_log2fc"],
+        "deg_median_log2fc": deg_stats["median_log2fc"],
+        "deg_mean_abs_log2fc": deg_stats["mean_abs_log2fc"],
+        "deg_mean_pval": deg_stats["mean_pval"],
+        "deg_median_pval": deg_stats["median_pval"],
+        "deg_frac_pval_lt_0_05": deg_stats["frac_pval_lt_0_05"],
+        "deg_pos": deg_stats["pos"],
+        "deg_neg": deg_stats["neg"],
+        "deg_zero": deg_stats["zero"],
+        "deg_frac_pos": deg_stats["frac_pos"],
+        "deg_frac_neg": deg_stats["frac_neg"],
+        "deg_unique_studies": deg_stats["unique_studies"],
+        "deg_unique_tissues": deg_stats["unique_tissues"],
+        "deg_unique_years": deg_stats["unique_years"],
+        "deg_year_min": deg_stats["year_min"],
+        "deg_year_max": deg_stats["year_max"],
+        "deg_year_mean": deg_stats["year_mean"],
+        "deg_top_study": deg_stats["top_study"],
+        "deg_top_study_count": deg_stats["top_study_count"],
+        "deg_top_tissue": deg_stats["top_tissue"],
+        "deg_top_tissue_count": deg_stats["top_tissue_count"],
+    }
+
+    if detf_deggrn is not None:
+        s = adjlist_stats(detf_deggrn)
+        row.update({
+            "detf_deggrn_tfs": s["tfs"],
+            "detf_deggrn_targets": s["genes"],
+            "detf_deggrn_edge_rows": s["edge_rows"],
+            "detf_deggrn_unique_edges": s["unique_edges"],
+            "detf_deggrn_density": s["density"],
+            "detf_deggrn_mean_weight": s["mean_weight"],
+            "detf_deggrn_median_weight": s["median_weight"],
+            "detf_deggrn_mean_abs_log2fc": s["mean_abs_log2fc"],
+        })
+
+    if tf_grn is not None:
+        s = adjlist_stats(tf_grn)
+        row.update({
+            "tf_grn_tfs": s["tfs"],
+            "tf_grn_targets": s["genes"],
+            "tf_grn_edge_rows": s["edge_rows"],
+            "tf_grn_unique_edges": s["unique_edges"],
+            "tf_grn_density": s["density"],
+            "tf_grn_mean_weight": s["mean_weight"],
+        })
+
+    if deg_grn is not None:
+        s = adjlist_stats(deg_grn)
+        row.update({
+            "deg_grn_tfs": s["tfs"],
+            "deg_grn_targets": s["genes"],
+            "deg_grn_edge_rows": s["edge_rows"],
+            "deg_grn_unique_edges": s["unique_edges"],
+            "deg_grn_density": s["density"],
+            "deg_grn_mean_weight": s["mean_weight"],
+        })
+
+    if reg_scores is None and detf_deggrn is not None:
+        reg_scores = regulatory_scores(detf_deggrn)
+    if reg_scores:
+        top = reg_scores[0]
+        row["top_detf_driver"] = top.get("TF", "")
+        row["top_detf_driver_score"] = top.get("driver_score", 0)
+    else:
+        row["top_detf_driver"] = ""
+        row["top_detf_driver_score"] = 0
+
+    if tf_regulators is None and tf_grn is not None:
+        tf_regulators = regulator_detection(tf_grn, disorderlist)
+    if tf_regulators:
+        top = tf_regulators[0]
+        row["top_tf_regulator"] = top.get("TF", "")
+        row["top_tf_regulator_score"] = top.get("driver_score", 0)
+    else:
+        row["top_tf_regulator"] = ""
+        row["top_tf_regulator_score"] = 0
+
+    if edgeweight_summary:
+        row["edgeweight_DEG_weight"] = edgeweight_summary.get("DEG_weight", 0)
+        row["edgeweight_nonDEG_weight"] = edgeweight_summary.get("nonDEG_weight", 0)
+        row["edgeweight_TF_weight"] = edgeweight_summary.get("TF_weight", 0)
+        row["edgeweight_DETF_weight"] = edgeweight_summary.get("DETF_weight", 0)
+
+    return row
+
+def write_csv(rows, outfile, fieldnames=None):
+    """
+    Write list of dicts to CSV. Uses keys from first row if fieldnames not provided.
+    """
+    if not rows:
+        return
+
+    if fieldnames is None:
+        fieldnames = list(rows[0].keys())
+
+    with open(outfile, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+def pairwise_jaccard_rows(name_to_set, pairs=None):
+    """
+    Compute pairwise Jaccard similarity rows for a dict of sets.
+    Optionally restrict to a list of pairs.
+    """
+    names = sorted(name_to_set.keys())
+    rows = []
+
+    if pairs is None:
+        pair_list = []
+        for i, a in enumerate(names):
+            for b in names[i+1:]:
+                pair_list.append((a, b))
+    else:
+        pair_list = list(pairs)
+
+    for a, b in pair_list:
+        if a not in name_to_set or b not in name_to_set:
+            continue
+        aset = name_to_set[a]
+        bset = name_to_set[b]
+        inter = len(aset & bset)
+        union = len(aset | bset)
+        jaccard = inter / union if union else 0
+        rows.append({
+            "disorder_a": a,
+            "disorder_b": b,
+            "intersection": inter,
+            "union": union,
+            "jaccard": jaccard,
+        })
+    return rows
+
 def log2fc_summary_old(adjlist): # only applies to degs = whatever has 7 values 
     #per tf (which does not have to be differentially regulated)
     
@@ -591,7 +974,7 @@ def calculate_clustering_coeff(adjlist): # input = adjlist like the one from A
         
         # find total number of edges by adding all values of the input dictionary for denominator
         degree = len(adjlist[i])
-        emax = degree * (degree 1)
+        emax = degree * (degree-1)
         
         # check if denominator = 0 and equation is undefined
         if emax == 0:
@@ -653,7 +1036,7 @@ def calculate_closeness(adjlist): #input adjlist from A, output dict of (node, c
         # hi: shortestpathdict bw non i and everything else
         ## calc closeness of i
 
-        numerator = (len(adjlist)) 1.0
+        numerator = (len(adjlist))-1.0
         denominator = 0.0
         # with dictionary of distances, sum up all values from 'u's to v 
         denominator = sum(shortestpathdict.values())
