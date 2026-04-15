@@ -159,16 +159,13 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_d
 
     1) Simple:
         {
-            TF: [(Gene, weight), ...]
-        }
+            TF: [(Gene, weight), ...]}
 
     2) Annotated:
         {
             TF: [
                 (Gene, weight, disorder, study, year, tissue, log2fc, pval),
-                ...
-            ]
-        }
+                ...]}
 
     Output:
         Interactive HTML visualization written to `outfile`.
@@ -256,6 +253,7 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_d
     G.write_html(outfile)
     return 
 
+# put common names. confidence of edges instead of p values
 def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None, top_genes_by_tfs=None): # constructed using anna ritz's course assignment as inspiration
     """
     Visualize a directed graph from an enriched edgelist and write it to an HTML file.
@@ -331,7 +329,7 @@ def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None, top_genes_by_tfs=N
         # shape
         shape = "triangle" if info["type"] == "TF" else "circle"
 
-        # size from pval
+        # size from pval NOT WORKING 
         size = 20
         if info["pval"] is not None and info["pval"] > 0:
             import math
@@ -361,7 +359,7 @@ def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None, top_genes_by_tfs=N
             borderWidth=3
         )
 
-    # Add edge weight representations
+    # Add edge weight representations. 
     for row in edgelist:
         tf = row[0]
         gene = row[1]
@@ -373,6 +371,134 @@ def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None, top_genes_by_tfs=N
     if len(G.edges) == 0:
         print("Warning: viz_graph has no edges to render.")
         return
+    G.toggle_physics(True)
+    G.show_buttons(filter_=["physics"])
+    G.write_html(outfile)
+
+# Overlay visualization across disorders with disorder-colored edges.
+def viz_overlay_disorders(edgelist, outfile, top_tfs=None, top_degs=None, top_genes_by_tfs=None):
+    """
+    Visualize a combined network across disorders with edge colors per disorder.
+
+    Input rows:
+        [TF, Gene, weight, disorder, study, year, tissue, log2fc, pval]
+
+    Encoding:
+      Edge color     > disorder
+      Edge width     > |weight|
+      TF nodes       > triangle
+      Gene nodes     > circle
+      Node size      > -log10(pval) (best evidence)
+      Node fill      > log2fc (red up / blue down)
+      Node border    > thickness scales with number of disorders the node appears in
+    """
+
+    if top_tfs is not None:
+        tf_counts = {}
+        for row in edgelist:
+            tf = row[0]
+            tf_counts[tf] = tf_counts.get(tf, 0) + 1
+        top = set(sorted(tf_counts, key=tf_counts.get, reverse=True)[:top_tfs])
+        edgelist = [row for row in edgelist if row[0] in top]
+    edgelist = _top_degs_edgelist(edgelist, top_degs)
+    edgelist = _top_genes_by_tfs_edgelist(edgelist, top_genes_by_tfs)
+
+    G = Network(directed=True)
+
+    node_info = {}
+
+    def _best_evidence(existing, log2fc, pval):
+        # prefer larger |log2fc|, then smaller pval
+        if log2fc is None:
+            log2fc = 0.0
+        if pval is None:
+            pval = float("inf")
+        score = (-abs(log2fc), pval)
+        if existing is None or score < existing[0]:
+            return (score, log2fc, pval)
+        return existing
+
+    for row in edgelist:
+        tf = row[0]
+        gene = row[1]
+        disorder = row[3] if len(row) > 3 else None
+        log2fc = row[7] if len(row) > 7 else None
+        pval = row[8] if len(row) > 8 else None
+
+        # TF node
+        tf_info = node_info.setdefault(tf, {"type": "TF", "disorders": set(), "best": None})
+        if disorder is not None:
+            tf_info["disorders"].add(disorder)
+        tf_info["best"] = _best_evidence(tf_info["best"], log2fc, pval)
+
+        # Gene node
+        gene_info = node_info.setdefault(gene, {"type": "Gene", "disorders": set(), "best": None})
+        if disorder is not None:
+            gene_info["disorders"].add(disorder)
+        gene_info["best"] = _best_evidence(gene_info["best"], log2fc, pval)
+
+    # Disorder palette for edges
+    disorders = sorted({
+        row[3]
+        for row in edgelist
+        if len(row) > 3 and row[3] is not None})
+
+    palette = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33", "#a65628", "#f781bf"]
+    disorder_color = {d: palette[i % len(palette)] for i, d in enumerate(disorders)}
+
+    # Add nodes
+    for node, info in node_info.items():
+        shape = "triangle" if info.get("type") == "TF" else "circle"
+
+        log2fc = None
+        pval = None
+        if info.get("best") is not None:
+            _, log2fc, pval = info["best"]
+
+        size = 20
+        if pval is not None and pval > 0:
+            size = 10 + (-math.log10(pval) * 6)
+            size = max(8, min(60, size))
+
+        fill = "#cccccc"
+        if log2fc is not None:
+            if log2fc > 0:
+                fill = "#d73027"
+            elif log2fc < 0:
+                fill = "#4575b4"
+
+        disorder_list = sorted(info.get("disorders", []))
+        disorder_count = len(disorder_list)
+        border_width = 2 + min(6, disorder_count)
+        title = "Disorders: " + (", ".join(disorder_list) if disorder_list else "none")
+
+        G.add_node(
+            node,
+            label=node,
+            shape=shape,
+            size=size,
+            title=title,
+            color={
+                "background": fill,
+                "border": "#222222"
+            },
+            borderWidth=border_width,
+        )
+
+    # Add edges
+    for row in edgelist:
+        tf = row[0]
+        gene = row[1]
+        weight = abs(row[2]) if len(row) > 2 else 1.0
+        disorder = row[3] if len(row) > 3 else None
+        color = disorder_color.get(disorder, "#999999")
+
+        G.add_edge(tf, gene, value=weight, color=color)
+
+    if len(G.edges) == 0:
+        print("Warning: viz_overlay_disorders has no edges to render.")
+        return
+
     G.toggle_physics(True)
     G.show_buttons(filter_=["physics"])
     G.write_html(outfile)
@@ -400,7 +526,6 @@ def get_degree(edgelist):
 # IS THE BELOW CORRECT?
 def calculate_degree(adjlist): # input = adj list
     #returns dict of (node:str, degree:int) pairs for every node in the graph 
-    
     D = {} 
     degree = 0
     

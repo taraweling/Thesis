@@ -3,19 +3,17 @@ from pyvis.network import Network as net
 import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
+import graph_utils as gu
 
-# -----------------------------
 # Helpers
-# -----------------------------
 
 def _extract_deg_genes(degset):
     """
     Normalize DEG inputs into a set of gene IDs.
-
     Accepts:
-      - set/iterable of gene strings
-      - list of DEG records (gene in index 0)
-      - dict keyed by gene
+    - set/iterable of gene strings
+    - list of DEG records (gene in index 0)
+    - dict keyed by gene
     """
     if degset is None:
         return set()
@@ -44,13 +42,30 @@ def _extract_deg_genes(degset):
 
 def _edge_log2fc_vals(edge, gene, gene_to_disorders):
     """
-    Return log2fc values for a given edge. Prefer edge metadata if present.
+    Return log2fc values for a given edge.
+    Prefer edge metadata if present; otherwise use disorder lookups.
     """
     if isinstance(edge, (list, tuple)) and len(edge) > 6:
         return [edge[6]]
     if gene_to_disorders is None:
         return []
     return [info[4] for info in gene_to_disorders.get(gene, [])]
+
+def _hgnc_label(node, cache):
+    """
+    Convert ENSG IDs to HGNC symbols for plot labels.
+    Falls back to the original node string if conversion fails.
+    """
+    if not isinstance(node, str):
+        return node
+    if node in cache:
+        return cache[node]
+    if gu.ENSEMBL_ID_RE.match(node):
+        label = gu.ensembl2gene(node) or node
+    else:
+        label = node
+    cache[node] = label
+    return label
 
 # use below fns on deg_grn_both to return tf_scores
 def regulatory_scores(deg_grn):
@@ -60,8 +75,12 @@ def regulatory_scores(deg_grn):
     and DEG log2FC values.
 
     driver_score = sum(weight * abs(log2fc))
-    """
 
+    This score couples GRN edge weights with differential expression.
+    In GRN analyses, integrating network structure with expression shifts can
+    reveal regulatory influences that are not obvious from DEGs alone.
+    (cite: anwer_transcriptional_2025)
+    """
     tf_scores = []
 
     for tf, edges in deg_grn.items():
@@ -70,6 +89,13 @@ def regulatory_scores(deg_grn):
         targets = set()
         log2fcs = []
 
+        """
+        For each TF, accumulate a weighted sum of expression shifts across
+        its DEG targets. The absolute value reflects magnitude of change,
+        while retaining the weight captures strength of inferred regulation.
+        This aligns with the idea that TF networks drive transcriptomic
+        trajectories in a subset of cases. (cite: nishiyama_systematic_2013)
+        """
         for rec in edges:
             gene = rec[0]
             weight = rec[1]
@@ -98,24 +124,32 @@ def regulatory_scores(deg_grn):
     
     return tf_scores
 
-###################
 # use below fns on deg_grn_tfsonly. 
 
 def regulator_detection(grn, disorderlist=None): # outputs tf_results but loses information on sign of regulation.
 
     """
-    Identify TFs whose high weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
+    Identify TFs whose high-weight regulatory edges target genes with
+    large expression shifts (driver regulators in a PANDA GRN network).
 
-    Driver score per TF: sum(weight * abs(log2fc_target))
-    = estimates how strongly a transcription factor's regulatory edges align with observed expression changes.
-    aka total regulatory influence of a TF over the disease transcriptome
-    
-    If edges already carry DEG metadata (log2fc at index 6), those values are used directly.
+    Driver score per TF:
+      sum(weight * abs(log2fc_target))
+    This estimates how strongly a TF's regulatory edges align with
+    observed expression changes (total regulatory influence).
 
-    Output: {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
+    If edges already carry DEG metadata (log2fc at index 6), those values
+    are used directly.
+
+    Output:
+      {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
     """
-    
-    # Build gene: disorder metadata dictionary (only if needed)
+
+    """
+    Build gene: disorder metadata dictionary (only if needed).
+    This lets us overlay differential expression onto GRN edges, which is
+    a common strategy for identifying regulators whose targets show strong
+    expression shifts. (cite: anwer_transcriptional_2025)
+    """
     gene_to_disorders = None
     if disorderlist is not None:
         gene_to_disorders = {}
@@ -133,6 +167,12 @@ def regulator_detection(grn, disorderlist=None): # outputs tf_results but loses 
         total_targets = 0
         log2fcs = []
         
+        """
+        Aggregate per-edge contributions to a TF driver score.
+        This reflects how strongly a TF's regulon aligns with observed DEGs,
+        echoing experimental observations that only a subset of TFs produce
+        large transcriptomic changes when perturbed. (cite: nishiyama_systematic_2013)
+        """
         for edge in targets:
             gene = edge[0]
             weight = edge[1]
@@ -144,6 +184,11 @@ def regulator_detection(grn, disorderlist=None): # outputs tf_results but loses 
 
             deg_targets += 1
 
+            """
+            Use all available log2fc observations for a gene when present
+            because regulatory effects can vary by condition/context.
+            (cite: martinez-corral_emergence_2024)
+            """
             for log2fc in log2fc_vals:
                 score += weight * abs(log2fc)
                 log2fcs.append(log2fc)
@@ -171,18 +216,27 @@ def signed_regulator_detection(grn, disorderlist=None): # outputs tf_results. be
 
     """
     Detect regulatory drivers while preserving direction metadata.
-    
-    Identify TFs whose high weight regulatory edges target genes with large expression shifts = regulator drivers in PANDA GRN network.
 
-    Driver score per TF: sum(weight * abs(log2fc_target))
-    = estimates how strongly a transcription factor's regulatory edges align with observed expression changes.
-    aka total regulatory influence of a TF over the disease transcriptome
-    
-    If edges already carry DEG metadata (log2fc at index 6), those values are used directly.
+    Identify TFs whose high-weight regulatory edges target genes with large
+    expression shifts (driver regulators in a PANDA GRN network).
 
-    Output: {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
+    Driver score per TF:
+      sum(weight * abs(log2fc_target))
+    This estimates how strongly a TF's regulatory edges align with observed
+    expression changes (total regulatory influence).
+
+    If edges already carry DEG metadata (log2fc at index 6), those values
+    are used directly.
+
+    Output:
+      {'TF':..., 'targets':..., 'deg_targets':..., 'driver_score':..., 'mean_target_log2fc':...}
     """
 
+    """
+    Directional scoring extends the driver concept by tracking sign:
+    TFs can act as activators or repressors, and in some contexts even show
+    mixed or incoherent behavior across targets. (cite: martinez-corral_emergence_2024)
+    """
     gene_to_disorders = None
     if disorderlist is not None:
         gene_to_disorders = {}
@@ -205,6 +259,12 @@ def signed_regulator_detection(grn, disorderlist=None): # outputs tf_results. be
         up = 0
         down = 0
 
+        """
+        Sum both magnitude (driver_score) and signed influence
+        (direction_score). The direction_ratio captures whether a TF's
+        effect is predominantly activating or repressing in this context,
+        consistent with duality in TF action. (cite: martinez-corral_emergence_2024)
+        """
         for edge in targets:
             
             gene = edge[0]
@@ -216,6 +276,11 @@ def signed_regulator_detection(grn, disorderlist=None): # outputs tf_results. be
             if not log2fc_vals:
                 continue
 
+            """
+            Summarize both magnitude and sign for each target, reflecting
+            TF duality (activation/repression) across contexts.
+            (cite: martinez-corral_emergence_2024)
+            """
             for log2fc in log2fc_vals:
                 driver_score += weight * abs(log2fc)
                 direction_score += weight * log2fc
@@ -245,13 +310,11 @@ def signed_regulator_detection(grn, disorderlist=None): # outputs tf_results. be
             "direction_ratio": direction_ratio,
             "mean_target_log2fc": mean_fc,
             "up_targets": up,
-            "down_targets": down
-        })
+            "down_targets": down})
 
     tf_results.sort(
         key=lambda x: x["driver_score"],
-        reverse=True
-    )
+        reverse=True)
 
     return tf_results
 
@@ -286,16 +349,17 @@ def deg_enrichment(tf_results):
 def plot_regulators(tf_results, top_n = 10):
 
     """
-    Plot top 10 TF regulatory drivers by driver_score
+    Plot top TF regulatory drivers by driver_score.
     """
 
     top = tf_results[:top_n]
 
     tfs = []
     scores = []
+    label_cache = {}
 
     for rec in top:
-        tfs.append(rec["TF"])
+        tfs.append(_hgnc_label(rec["TF"], label_cache))
         scores.append(rec["driver_score"])
 
     plt.figure(figsize=(10,6))
@@ -315,7 +379,7 @@ def plot_regulators(tf_results, top_n = 10):
 def plot_deg_fraction(tf_results):
 
     """
-    Scatter plot of TF targets vs DEG targets
+    Scatter plot of TF targets vs DEG targets.
     """
 
     targets = []
@@ -363,17 +427,22 @@ def extract_modules(deggrn, tf_results, top_n = 10):
 
 def edgeweight_summary(grn, degset):
     """
-    Input
-        adjlist : PANDA GRN adjacency list
-                  {TF: [(target, weight), ...]}
+    Input:
+      adjlist: PANDA GRN adjacency list
+        {TF: [(target, weight), ...]}
+      deg_set: set of differentially expressed genes
+        OR list of DEG records (gene in column 0)
 
-        deg_set : set of differentially expressed genes
-                  OR list of DEG records (gene in column 0)
-
-    Output
-        dictionary summarizing edge weight statistics
+    Output:
+      dictionary summarizing edge weight statistics
     """
 
+    """
+    Compare regulatory pressure on DEG targets vs non-DEG targets by
+    summarizing edge weights. This contrasts network influence on dysregulated
+    genes with background regulation, a common GRN analysis motif.
+    (cite: anwer_transcriptional_2025)
+    """
     tf_set = set(grn.keys()) 
     deg_set = _extract_deg_genes(degset)
     detf_set = tf_set & deg_set
@@ -414,23 +483,21 @@ def edgeweight_summary(grn, degset):
         "DEG_weight": sum(deg_weights)/len(deg_weights) if deg_weights else 0, # measures regulatory pressure acting on dysregulated genes. (TF to DEG)
         "nonDEG_weight": sum(nondeg_weights)/len(nondeg_weights) if nondeg_weights else 0, # baseline regulatory distribution (TF to background genes)
         "TF_weight": sum(tf_means)/len(tf_means) if tf_means else 0, # avg regulatory strength across all TF regulators.
-        "DETF_weight": sum(detf_means)/len(detf_means) if detf_means else 0 # avg regulatory strength for DETFs
-    }
+        "DETF_weight": sum(detf_means)/len(detf_means) if detf_means else 0} # avg regulatory strength for DETFs
 
     return summary
 
 def edgeweight_summary_old(adjlist, *condition:None): # AVERAGES DOESN'T WORK
     """
     Input:
-        Any adjacency list structured as:
-            {TF: (gene1, regweight1), (gene2, regweight2)]}
-    
+      Any adjacency list structured as:
+      {TF: (gene1, regweight1), (gene2, regweight2)]}
+
     Output:
-        printable dict containing average edge weight counts for:
-              DETFs (TF nodes)
-              DEGs (targets)
-              DEXs (both tfs and gene targets)
-            
+      Printable dict containing average edge weight counts for:
+      - DETFs (TF nodes)
+      - DEGs (targets)
+      - DEXs (both TFs and gene targets)
     """
     tf_avg = [] # tf avgs
     g_avg = []
@@ -452,8 +519,7 @@ def edgeweight_summary_old(adjlist, *condition:None): # AVERAGES DOESN'T WORK
         "DEGs_average":  sum(degs_avg) / len(degs_avg), # averages all degs
         "TFs_avg": sum(tf_avg) / len(tf_avg), # average TF
         "DETFs_avg": sum(),
-        "G_avg": sum(g_avg) / len(g_avg)
-        }
+        "G_avg": sum(g_avg) / len(g_avg)}
     
     return summary
 
@@ -465,6 +531,12 @@ def edgeweight_summary_old(adjlist, *condition:None): # AVERAGES DOESN'T WORK
 
 def log2fc_summary(adjlist): # used chatgpt to fix previous function
 
+    """
+    Summarize differential expression signs across targets and infer TF
+    "effect sign" from the balance of up/down targets. This is a coarse
+    proxy for activation vs repression and should be interpreted in light
+    of TF duality and context dependence. (cite: martinez-corral_emergence_2024)
+    """
     # gene  > list of log2fc values (prevents overwrite)
     gene_log2fc = {}
 
@@ -510,6 +582,11 @@ def log2fc_summary(adjlist): # used chatgpt to fix previous function
             pos = tf_signs.count("positive")
             neg = tf_signs.count("negative")
 
+            """
+            Majority vote is a simple proxy for TF effect direction.
+            This is intentionally coarse given evidence that TFs can show
+            mixed activation/repression depending on context. (cite: martinez-corral_emergence_2024)
+            """
             if pos > neg:
                 tf_effect_sign[tf] = "positive"
             elif neg > pos:
@@ -542,14 +619,11 @@ def log2fc_summary(adjlist): # used chatgpt to fix previous function
         "TFs_total": len(tf_effect_sign),
         "TFs_avg": safe_mean(tf_avg),
         "TFs_positive": sum(1 for s in tf_effect_sign.values() if s == "positive"),
-        "TFs_negative": sum(1 for s in tf_effect_sign.values() if s == "negative"),
-    }
+        "TFs_negative": sum(1 for s in tf_effect_sign.values() if s == "negative"),}
 
     return summary
 
-# -----------------------------
 # CSV-friendly summaries
-# -----------------------------
 
 def _safe_mean(vals):
     return sum(vals) / len(vals) if vals else 0
@@ -560,7 +634,7 @@ def _safe_median(vals):
 def deglist_stats(disorderlist):
     """
     Compute basic stats from a disorder list:
-      [GENEID, DISORDER, STUDY, YEAR, TISSUE, LOG2FC, PVAL]
+    [GENEID, DISORDER, STUDY, YEAR, TISSUE, LOG2FC, PVAL]
     """
     if not disorderlist:
         return {
@@ -586,8 +660,7 @@ def deglist_stats(disorderlist):
             "top_study": "",
             "top_study_count": 0,
             "top_tissue": "",
-            "top_tissue_count": 0,
-        }
+            "top_tissue_count": 0,}
 
     genes = [rec[0] for rec in disorderlist if rec]
     log2fcs = [rec[5] for rec in disorderlist if len(rec) > 5]
@@ -643,8 +716,7 @@ def deglist_stats(disorderlist):
         "top_study": top_study,
         "top_study_count": top_study_count,
         "top_tissue": top_tissue,
-        "top_tissue_count": top_tissue_count,
-    }
+        "top_tissue_count": top_tissue_count,}
 
 def adjlist_stats(adjlist):
     """
@@ -665,8 +737,7 @@ def adjlist_stats(adjlist):
             "median_weight": 0,
             "mean_abs_log2fc": 0,
             "frac_up_log2fc": 0,
-            "frac_down_log2fc": 0,
-        }
+            "frac_down_log2fc": 0,}
 
     tfs = set(adjlist.keys())
     genes = set()
@@ -725,8 +796,7 @@ def adjlist_stats(adjlist):
         "median_weight": _safe_median(weights),
         "mean_abs_log2fc": _safe_mean([abs(v) for v in log2fcs]),
         "frac_up_log2fc": pos / total if total else 0,
-        "frac_down_log2fc": neg / total if total else 0,
-    }
+        "frac_down_log2fc": neg / total if total else 0,}
 
 def disorder_summary_row(
     name,
@@ -767,8 +837,7 @@ def disorder_summary_row(
         "deg_top_study": deg_stats["top_study"],
         "deg_top_study_count": deg_stats["top_study_count"],
         "deg_top_tissue": deg_stats["top_tissue"],
-        "deg_top_tissue_count": deg_stats["top_tissue_count"],
-    }
+        "deg_top_tissue_count": deg_stats["top_tissue_count"],}
 
     if detf_deggrn is not None:
         s = adjlist_stats(detf_deggrn)
@@ -780,8 +849,7 @@ def disorder_summary_row(
             "detf_deggrn_density": s["density"],
             "detf_deggrn_mean_weight": s["mean_weight"],
             "detf_deggrn_median_weight": s["median_weight"],
-            "detf_deggrn_mean_abs_log2fc": s["mean_abs_log2fc"],
-        })
+            "detf_deggrn_mean_abs_log2fc": s["mean_abs_log2fc"],})
 
     if tf_grn is not None:
         s = adjlist_stats(tf_grn)
@@ -791,8 +859,7 @@ def disorder_summary_row(
             "tf_grn_edge_rows": s["edge_rows"],
             "tf_grn_unique_edges": s["unique_edges"],
             "tf_grn_density": s["density"],
-            "tf_grn_mean_weight": s["mean_weight"],
-        })
+            "tf_grn_mean_weight": s["mean_weight"],})
 
     if deg_grn is not None:
         s = adjlist_stats(deg_grn)
@@ -802,8 +869,7 @@ def disorder_summary_row(
             "deg_grn_edge_rows": s["edge_rows"],
             "deg_grn_unique_edges": s["unique_edges"],
             "deg_grn_density": s["density"],
-            "deg_grn_mean_weight": s["mean_weight"],
-        })
+            "deg_grn_mean_weight": s["mean_weight"],})
 
     if reg_scores is None and detf_deggrn is not None:
         reg_scores = regulatory_scores(detf_deggrn)
@@ -835,7 +901,8 @@ def disorder_summary_row(
 
 def write_csv(rows, outfile, fieldnames=None):
     """
-    Write list of dicts to CSV. Uses keys from first row if fieldnames not provided.
+    Write list of dicts to CSV.
+    Uses keys from the first row if fieldnames are not provided.
     """
     if not rows:
         return
@@ -878,8 +945,7 @@ def pairwise_jaccard_rows(name_to_set, pairs=None):
             "disorder_b": b,
             "intersection": inter,
             "union": union,
-            "jaccard": jaccard,
-        })
+            "jaccard": jaccard,})
     return rows
 
 def log2fc_summary_old(adjlist): # only applies to degs = whatever has 7 values 
@@ -887,16 +953,16 @@ def log2fc_summary_old(adjlist): # only applies to degs = whatever has 7 values
     
     """
     Input:
-        DEG GRN adjacency list structured as :
-            {TF: (DEG1, etc), (DEG2, etc)]}
-            
-        Figure out later if I should cut TFs down to DETF...
-            {TF: (geneID, edgeweight, disorder, study, year, tissue, log2fc, pval)}
+      DEG GRN adjacency list structured as:
+        {TF: (DEG1, etc), (DEG2, etc)]}
+
+      Figure out later if I should cut TFs down to DETF...
+        {TF: (geneID, edgeweight, disorder, study, year, tissue, log2fc, pval)}
 
     Output:
-        dict containing sign counts for:
-              DEGs (targets)
-              DETFs (TF nodes)
+      dict containing sign counts for:
+      - DEGs (targets)
+      - DETFs (TF nodes)
     """
     
     deg_sign = {}   # gene  > sign
@@ -949,8 +1015,7 @@ def log2fc_summary_old(adjlist): # only applies to degs = whatever has 7 values
         "TFs_total": len(detf_sign),
         "TFs_avg": sum(tf_avg) / len(tf_avg), # average TF
         "TFs_positive": sum(1 for s in detf_sign.values() if s == "positive"),
-        "TFs_negative": sum(1 for s in detf_sign.values() if s == "negative"),
-        }
+        "TFs_negative": sum(1 for s in detf_sign.values() if s == "negative"),}
 
     return summary
 
@@ -962,10 +1027,9 @@ def calculate_clustering_coeff(adjlist): # input = adjlist like the one from A
     
     """
     Input:
-
-    
-    Output:  dict of (node:str, clustering_coeff:float)
-    
+      adjacency list like the one from A
+    Output:
+      dict of (node:str, clustering_coeff:float)
     """
     C = {}
     clustering_coeff = 0
