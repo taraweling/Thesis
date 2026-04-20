@@ -801,6 +801,136 @@ def de_grn_degsonly(grn, disorderlist):
 
     return finalgrn
 
+def _tf_targets(adj):
+    """
+    Build TF -> set(target genes) from an adjacency list.
+    Supports simple (gene, weight) edges and annotated edges where the gene
+    identifier remains in index 0.
+    """
+    tf_targets = {}
+
+    for tf, edges in adj.items():
+        tf_targets[tf] = {
+            edge[0]
+            for edge in edges
+            if isinstance(edge, (list, tuple)) and len(edge) > 0
+        }
+
+    return tf_targets
+
+def feed_forward_loops(adj, degset):
+    """
+    FFL definition:
+      TF A regulates TF B
+      TF A regulates DEG C
+      TF B regulates DEG C
+    """
+    loops = []
+
+    tf_targets = _tf_targets(adj)
+    tfs = set(adj.keys())
+    degset = set(degset) if degset is not None else set()
+
+    for tfA in tfs:
+        targetsA = tf_targets.get(tfA, set())
+
+        # TF B must also be a TF node.
+        tf_targets_in_A = targetsA & tfs
+        for tfB in tf_targets_in_A:
+            targetsB = tf_targets.get(tfB, set())
+            shared_targets = targetsA & targetsB & degset
+
+            for gene in shared_targets:
+                loops.append({
+                    "TF_A": tfA,
+                    "TF_B": tfB,
+                    "target_DEG": gene,
+                })
+
+    return loops
+
+def feedback_loops(adj):
+    """
+    Feedback loop definition:
+      TF A regulates TF B
+      TF B regulates TF A
+    """
+    loops = []
+
+    tf_targets = _tf_targets(adj)
+    tfs = set(adj.keys())
+
+    for tfA in tfs:
+        targetsA = tf_targets.get(tfA, set())
+        tf_targets_in_A = targetsA & tfs
+
+        for tfB in tf_targets_in_A:
+            targetsB = tf_targets.get(tfB, set())
+            if tfA in targetsB:
+                loops.append({
+                    "TF_A": tfA,
+                    "TF_B": tfB,
+                })
+
+    return loops
+
+def detect_regulatory_loops(degs, grn_by_name, graph_label="grn"):
+    """
+    Run per-disorder feed-forward and feedback loop detection over a GRN map.
+    Returns:
+      (ffl_by_name, fbl_by_name, ffl_rows, fbl_rows)
+    """
+    ffl_by_name = {}
+    fbl_by_name = {}
+    ffl_rows = []
+    fbl_rows = []
+
+    print(f"\nsearching for regulatory loops ({graph_label})")
+
+    for name, data in degs.items():
+        if name not in grn_by_name:
+            continue
+        if not data:
+            continue
+
+        print("\nloop detection for", name, f"({graph_label})")
+
+        adj = grn_by_name[name]
+        degset = {row[0] for row in data if row}
+
+        ffls = feed_forward_loops(adj, degset)
+        fbls = feedback_loops(adj)
+
+        ffl_by_name[name] = ffls
+        fbl_by_name[name] = fbls
+
+        for rec in ffls:
+            ffl_rows.append({
+                "graph": graph_label,
+                "disorder": name,
+                "TF_A": rec["TF_A"],
+                "TF_B": rec["TF_B"],
+                "target_DEG": rec["target_DEG"],
+            })
+
+        for rec in fbls:
+            fbl_rows.append({
+                "graph": graph_label,
+                "disorder": name,
+                "TF_A": rec["TF_A"],
+                "TF_B": rec["TF_B"],
+            })
+
+        print(
+            name,
+            "FFLs:",
+            len(ffls),
+            "FBLs:",
+            len(fbls),
+        )
+
+    return ffl_by_name, fbl_by_name, ffl_rows, fbl_rows
+
 def expand_node_attributes(adjlist:dict, genes:list): # UNFINISHED
     """
     Placeholder for future node attribute expansion logic.
