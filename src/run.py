@@ -7,7 +7,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 RUN_TESTS = False
-TOP_DEGS = 100
+TOP_DEGS = 10
 
 GRAND_RETRY = Retry(
     total=3,

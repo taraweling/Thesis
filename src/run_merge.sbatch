@@ -9,4 +9,5 @@
 
 mkdir -p logs
 
-python run.py
+python randomwalk.py
+
