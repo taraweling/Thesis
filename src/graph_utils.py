@@ -57,6 +57,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WALKER_MASTER_DIR = os.path.join(BASE_DIR, "Walker-master")
 WALKER_INPUT_PPI_DIR = os.path.join(WALKER_MASTER_DIR, "input_ppi")
 WALKER_INPUT_SEED_DIR = os.path.join(WALKER_MASTER_DIR, "input_seed")
+_RUNTIME_WARNINGS = set()
+
+
+def _warn_once(key, message):
+    if key in _RUNTIME_WARNINGS:
+        return
+    print(message)
+    _RUNTIME_WARNINGS.add(key)
 
 # purpose of gene2ensembl vs ensemblify: single lookups, debugging, 
 def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion of code 
@@ -359,6 +367,54 @@ def ensemblify(genedict):
             newdict[new_k] = v
 
     return newdict
+
+def ensemblify_targets(genedict):
+    """
+    Convert only TARGET genes in an adjacency-list GRN to ENSEMBL IDs.
+    TF/source keys are preserved as-is.
+
+    Accepts:
+      {TF: [(Gene, weight), ...]}
+    and annotated variants where index 0 remains the target gene.
+    """
+    targets = set()
+    for _, edges in genedict.items():
+        if not isinstance(edges, list):
+            continue
+        for edge in edges:
+            if isinstance(edge, (list, tuple)) and len(edge) > 0 and isinstance(edge[0], str):
+                targets.add(edge[0])
+
+    ensg = {g for g in targets if ENSEMBL_ID_RE.match(g)}
+    locs = {g for g in targets if LOC_RE.match(g)}
+    xlocs = {g for g in targets if XLOC_RE.match(g)}
+    symbols = targets - ensg - locs - xlocs
+
+    mapping = {}
+    mapping.update({g: g for g in ensg})
+    if symbols:
+        mapping.update(_bulk_symbol_lookup(symbols))
+    if locs or xlocs:
+        mapping.update(_resolve_special_cases(locs | xlocs))
+
+    out = {}
+    for tf, edges in genedict.items():
+        if not isinstance(edges, list):
+            out[tf] = edges
+            continue
+
+        new_edges = []
+        for edge in edges:
+            if not isinstance(edge, (list, tuple)) or len(edge) == 0:
+                continue
+            new_gene = mapping.get(edge[0], edge[0])
+            if len(edge) == 1:
+                new_edges.append((new_gene,))
+            else:
+                new_edges.append((new_gene, *edge[1:]))
+        out[tf] = new_edges
+
+    return out
 
 def ensemblifylist(disorderlist):
     """
@@ -801,7 +857,7 @@ def disorder_list(filename:str, *disorder:str): # generates the concatenated lis
 
     return records
 
-def de_grn_tfsonly(grn,disorderlist): # aka enrich GRN with DEG info
+def de_grn_tfsonly(grn, disorderlist, tf_degset=None): # aka enrich GRN with DEG info
     """
     Merge GRN adjacency list with disorder metadata, producing:
     {TF: [(Gene, GRN_weight, disorder, study, year, tissue, log2fc, pval), ...]}
@@ -831,7 +887,17 @@ def de_grn_tfsonly(grn,disorderlist): # aka enrich GRN with DEG info
         info = tuple(rec[1:])
         gene_to_disorders.setdefault(gene_id, []).append(info)
 
-    degset = set(gene_to_disorders.keys())
+    target_degset = set(gene_to_disorders.keys())
+    tf_degset = set(tf_degset) if tf_degset is not None else target_degset
+    tf_keyset = set(grn.keys())
+    apply_tf_filter = bool(tf_keyset & tf_degset)
+
+    if not apply_tf_filter:
+        _warn_once(
+            "de_grn_tfsonly_no_tf_overlap",
+            "warning: no overlap between GRN TF IDs and DEG TF candidate IDs; "
+            "skipping TF-DEG filter and keeping all TFs with DEG targets",
+        )
 
     finalgrn = {}
 
@@ -842,7 +908,7 @@ def de_grn_tfsonly(grn,disorderlist): # aka enrich GRN with DEG info
         a subset of TFs drive the strongest transcriptomic changes.
         (cite: nishiyama_systematic_2013)
         """
-        if tf not in degset:
+        if apply_tf_filter and tf not in tf_degset:
             continue
 
         merged = []
@@ -854,7 +920,7 @@ def de_grn_tfsonly(grn,disorderlist): # aka enrich GRN with DEG info
             rows because TF effects can vary by context.
             (cite: martinez-corral_emergence_2024)
             """
-            if gene not in degset:
+            if gene not in target_degset:
                 continue
 
             for disorder_info in gene_to_disorders[gene]:
@@ -920,7 +986,7 @@ def de_grn_both(grn, disorderlist):
 
     return finalgrn
 
-def de_grn_degsonly(grn, disorderlist):
+def de_grn_degsonly(grn, disorderlist, tf_degset=None):
 
     """
     Identify regulatory edges where:
@@ -950,14 +1016,24 @@ def de_grn_degsonly(grn, disorderlist):
         info = tuple(rec[1:])
         gene_to_disorders.setdefault(gene_id, []).append(info)
 
-    degset = set(gene_to_disorders.keys())
+    target_degset = set(gene_to_disorders.keys())
+    tf_degset = set(tf_degset) if tf_degset is not None else target_degset
+    tf_keyset = set(grn.keys())
+    exclude_deg_tfs = bool(tf_keyset & tf_degset)
+
+    if not exclude_deg_tfs:
+        _warn_once(
+            "de_grn_degsonly_no_tf_overlap",
+            "warning: no overlap between GRN TF IDs and DEG TF candidate IDs; "
+            "skipping TF exclusion in de_grn_degsonly",
+        )
 
     finalgrn = {}
 
     for tf, targets in grn.items():
 
         # Skip TFs that ARE DEGs
-        if tf in degset:
+        if exclude_deg_tfs and tf in tf_degset:
             continue
 
         merged = []
@@ -965,7 +1041,7 @@ def de_grn_degsonly(grn, disorderlist):
         for gene, weight in targets:
 
             # Only keep targets that ARE DEGs
-            if gene not in degset:
+            if gene not in target_degset:
                 continue
 
             # Attach all disorder metadata rows

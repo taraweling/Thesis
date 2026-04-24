@@ -592,7 +592,7 @@ def extract_modules(deggrn, tf_results, top_n = 10):
 
 # use below fns for any adjlist of the structure
 
-def edgeweight_summary(grn, degset):
+def edgeweight_summary(grn, degset, tf_degset=None):
     """
     Input
         adjlist : PANDA GRN adjacency list
@@ -605,9 +605,10 @@ def edgeweight_summary(grn, degset):
     """
 
     tf_set = set(grn.keys()) 
-    deg_set = _extract_deg_genes(degset)
-    detf_set = tf_set & deg_set
-    print("detfs",(list(detf_set)[:10]),list(deg_set)[:10])
+    deg_set = _extract_deg_genes(degset)  # target DEG IDs (typically ENSG)
+    tf_deg_set = _extract_deg_genes(tf_degset) if tf_degset is not None else deg_set
+    detf_set = tf_set & tf_deg_set
+    print("detfs", (list(detf_set)[:10]), list(tf_deg_set)[:10])
 
     deg_weights = []
     nondeg_weights = []

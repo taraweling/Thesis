@@ -3,6 +3,32 @@ from pyvis.network import Network
 import math
 import graph_utils as gu
 
+# Shared process-level cache for ENSG -> display label lookups.
+_GENE_LABEL_CACHE = {}
+
+def clear_gene_label_cache():
+    """
+    Clear cached gene labels (useful for tests/debugging).
+    """
+    _GENE_LABEL_CACHE.clear()
+
+def _gene_display_label(gene_id):
+    """
+    Resolve a target gene node label for visualization.
+    Keeps TF IDs unchanged; for ENSG targets, attempts symbol mapping and caches result.
+    """
+    if gene_id in _GENE_LABEL_CACHE:
+        return _GENE_LABEL_CACHE[gene_id]
+
+    if isinstance(gene_id, str) and gu.ENSEMBL_ID_RE.match(gene_id):
+        mapped = gu.ensembl2gene(gene_id)
+        label = mapped if mapped else gene_id
+    else:
+        label = gene_id
+
+    _GENE_LABEL_CACHE[gene_id] = label
+    return label
+
 # All functions now assume edgelist rows look like:
 # [TF, Gene, weight] OR
 # [TF, Gene, weight, disorder, study, year, tissue, log2fc, pval]
@@ -164,6 +190,7 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_d
     for node, info in node_info.items():
 
         shape = "triangle" if info.get("type") == "TF" else "circle"
+        label = node if info.get("type") == "TF" else _gene_display_label(node)
 
         # size from p value
         size = 20
@@ -181,7 +208,7 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_d
 
         G.add_node(
             node,
-            label=node,
+            label=label,
             shape=shape,
             size=size,
             color=color,
@@ -261,6 +288,7 @@ def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None): # constructed usi
 
         # shape
         shape = "triangle" if info["type"] == "TF" else "circle"
+        label = n if info["type"] == "TF" else _gene_display_label(n)
 
         # size from pval
         size = 20
@@ -278,7 +306,7 @@ def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None): # constructed usi
 
         G.add_node(
             n,
-            label=n,
+            label=label,
             shape=shape,
             size=size,
             color=color,
