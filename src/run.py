@@ -17,8 +17,7 @@ GRAND_RETRY = Retry(
     status_forcelist=(429, 500, 502, 503, 504),
     allowed_methods=("POST"),
     raise_on_status=False,
-)
-
+) 
 
 def _grand_session():
     s = requests.Session()
@@ -38,20 +37,6 @@ def _grand_api_candidates():
     # Deduplicate while preserving order.
     return list(dict.fromkeys(fallbacks))
 
-
-def _write_weighted_edgelist_txt(adjlist, outfile):
-    seen = set()
-    with open(outfile, "w") as f:
-        for tf, edges in adjlist.items():
-            for edge in edges:
-                if len(edge) < 2:
-                    continue
-                gene, weight = edge[0], edge[1]
-                key = (tf, gene, weight)
-                if key in seen:
-                    continue
-                seen.add(key)
-                f.write(f"{tf}\t{gene}\t{weight}\n")
 
 # INSTRUCTIONS: RUN WHILE IN SRC FOLDER
 def main():
@@ -75,10 +60,13 @@ def main():
     
     # produce text file of adjlist
     #with open("grand_brain_grn.txt", "w") as f: f.write("\n".join(f"{tf} [{gene}, {weight}]" for tf, edges in grn.items() for gene, weight in edges))
-    _write_weighted_edgelist_txt(
+    gu.write_weighted_edgelist_txt(
         grn,
         "results/full_brain_grn_weighted_edgelist.txt",
     )
+    full_ppi_path = os.path.join(gu.WALKER_INPUT_PPI_DIR, "full_brain_grn.ppi")
+    gu.write_walker_ppi(grn, full_ppi_path)
+    print("wrote Walker .ppi:", full_ppi_path)
     # run.py (right after ensemblify)
    
     ensg_tfs = [tf for tf in grn if gu.ENSEMBL_ID_RE.match(tf)]
@@ -92,6 +80,7 @@ def main():
 
     # per-disorder outputs (the by-name suffix allows us to 
     detf_deggrn_by_name = {}
+    detf_deggrn_viz_by_name = {}
     tf_grn_by_name = {}
     deg_grn_by_name = {}
     detf_deggrn_edgelist_by_name = {}
@@ -99,7 +88,9 @@ def main():
     tf_regulators_by_name = {}
     edgeweight_summary_by_name = {}
     log2fc_summary_by_name = {}
+    bipartite_reports_by_name = {}
     summary_rows = []
+    bipartite_stat_rows = []
     deg_gene_sets = {}
     detf_edge_sets = {}
     study_sets = {}
@@ -134,14 +125,34 @@ def main():
         detf_deggrn_by_name[name] = detf_deggrn
         tf_grn_by_name[name] = tf_grn
         deg_grn_by_name[name] = deg_grn
-        _write_weighted_edgelist_txt(
+        gu.write_weighted_edgelist_txt(
             detf_deggrn,
             f"results/{name.lower()}_detf_deggrn_weighted_edgelist.txt",
         )
-        _write_weighted_edgelist_txt(
+        gu.write_weighted_edgelist_txt(
             deg_grn,
             f"results/{name.lower()}_deg_grn_weighted_edgelist.txt",
         )
+        detf_ppi_path = os.path.join(
+            gu.WALKER_INPUT_PPI_DIR, f"{name.lower()}_detf_deggrn.ppi"
+        )
+        deg_ppi_path = os.path.join(
+            gu.WALKER_INPUT_PPI_DIR, f"{name.lower()}_deg_grn.ppi"
+        )
+        tf_ppi_path = os.path.join(
+            gu.WALKER_INPUT_PPI_DIR, f"{name.lower()}_tf_grn.ppi"
+        )
+        gu.write_walker_ppi(detf_deggrn, detf_ppi_path)
+        gu.write_walker_ppi(deg_grn, deg_ppi_path)
+        gu.write_walker_ppi(tf_grn, tf_ppi_path)
+        seed_txt_path = os.path.join(
+            gu.WALKER_INPUT_SEED_DIR, f"{name.lower()}_seed.txt"
+        )
+        gu.save_adj_list_as_txt(deg_grn, seed_txt_path)
+        print("wrote Walker .ppi:", detf_ppi_path)
+        print("wrote Walker .ppi:", deg_ppi_path)
+        print("wrote Walker .ppi:", tf_ppi_path)
+        print("wrote Walker seed .txt:", seed_txt_path)
 
         # naming system for quick access (e.g., adhd_detf_deggrn)
         globals()[f"{name.lower()}_detf_deggrn"] = detf_deggrn
@@ -150,7 +161,8 @@ def main():
 
         # apply graph_algos to each disorder-specific GRN
         reg_scores_by_name[name] = ga.regulatory_scores(detf_deggrn)
-        detf_deggrn_edgelist_by_name[name] = gu.adjlist2edgelist(detf_deggrn)
+        detf_deggrn_viz_by_name[name] = gu.aggregate_tf_gene_edges(detf_deggrn, weight_agg="mean")
+        detf_deggrn_edgelist_by_name[name] = gu.adjlist2edgelist(detf_deggrn_viz_by_name[name])
         tf_regulators_by_name[name] = ga.regulator_detection(tf_grn, data)
         edgeweight_summary_by_name[name] = ga.edgeweight_summary(grn, data)
         log2fc_summary_by_name[name] = {
@@ -158,18 +170,36 @@ def main():
             "tf_grn": ga.log2fc_summary(tf_grn),
             "deg_grn": ga.log2fc_summary(deg_grn),
         }
+        bipartite_reports_by_name[name] = ga.disorder_bipartite_report(
+            detf_deggrn,
+            name,
+            outdir="results",
+        )
+        bipartite_stat_rows.extend(
+            ga.disorder_bipartite_stat_rows(
+                name,
+                bipartite_reports_by_name[name],
+            )
+        )
 
         # collect per-disorder summary row for CSV
-        summary_rows.append(
-            ga.disorder_summary_row(
-                name=name,
-                disorderlist=data,
-                detf_deggrn=detf_deggrn,
-                tf_grn=tf_grn,
-                deg_grn=deg_grn,
-                reg_scores=reg_scores_by_name[name],
-                tf_regulators=tf_regulators_by_name[name],
-                edgeweight_summary=edgeweight_summary_by_name[name],))
+        disorder_row = ga.disorder_summary_row(
+            name=name,
+            disorderlist=data,
+            detf_deggrn=detf_deggrn,
+            tf_grn=tf_grn,
+            deg_grn=deg_grn,
+            reg_scores=reg_scores_by_name[name],
+            tf_regulators=tf_regulators_by_name[name],
+            edgeweight_summary=edgeweight_summary_by_name[name],
+        )
+        disorder_row.update(
+            ga.disorder_bipartite_summary_row(
+                name,
+                bipartite_reports_by_name[name],
+            )
+        )
+        summary_rows.append(disorder_row)
 
         # sets for pairwise Jaccard comparisons
         deg_gene_sets[name] = {rec[0] for rec in data}
@@ -203,9 +233,12 @@ def main():
         print(f"  log2fc summary (detf_deggrn): {log2fc_summary_by_name[name]['detf_deggrn']}")
         print(f"  log2fc summary (tf_grn): {log2fc_summary_by_name[name]['tf_grn']}")
         print(f"  log2fc summary (deg_grn): {log2fc_summary_by_name[name]['deg_grn']}")
+        print(f"  bipartite boxplot file: {bipartite_reports_by_name[name]['boxplot_file']}")
+        print(f"  bipartite violin file: {bipartite_reports_by_name[name]['violinplot_file']}")
 
     # visualize graphs per disorder
     for name, detf_deggrn in detf_deggrn_by_name.items():
+        detf_deggrn_viz = detf_deggrn_viz_by_name[name]
         detf_deggrnedgelist = detf_deggrn_edgelist_by_name[name]
         gv.viz_graph(
             detf_deggrnedgelist,
@@ -213,13 +246,17 @@ def main():
             top_degs=TOP_DEGS,
         )
         gv.pyviz_deggrn(
-            detf_deggrn,
+            detf_deggrn_viz,
             outfile=f"results/pyviz_{name.lower()}.html",
             top_degs=TOP_DEGS,
         )
 
     # write CSV comparisons
     ga.write_csv(summary_rows, "results/deggrn_disorder_summary.csv")
+    ga.write_csv(
+        bipartite_stat_rows,
+        "results/deggrn_bipartite_metric_stats.csv",
+    )
     ga.write_csv(
         ga.pairwise_jaccard_rows(deg_gene_sets),
         "results/deggrn_jaccard_deg_genes.csv",)

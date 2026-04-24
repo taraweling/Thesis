@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from pyvis.network import Network
 import math
+import graph_utils as gu
 
 # All functions now assume edgelist rows look like:
 # [TF, Gene, weight] OR
@@ -39,8 +40,9 @@ def _top_degs_adjlist(adjlist, top_degs):
     for tf, edges in adjlist.items():
         for edge in edges:
             gene = edge[0] if isinstance(edge, (list, tuple)) else edge
-            log2fc = edge[7] if isinstance(edge, (list, tuple)) and len(edge) > 7 else None
-            pval = edge[8] if isinstance(edge, (list, tuple)) and len(edge) > 8 else None
+            # adjlist edge format: (gene, weight, disorder, study, year, tissue, log2fc, pval)
+            log2fc = edge[6] if isinstance(edge, (list, tuple)) and len(edge) > 6 else None
+            pval = edge[7] if isinstance(edge, (list, tuple)) and len(edge) > 7 else None
 
             abs_log2fc = abs(log2fc) if log2fc is not None else 0.0
             pval_score = pval if pval is not None else float("inf")
@@ -83,6 +85,27 @@ def _top_degs_edgelist(edgelist, top_degs):
     keep = set(top)
     return [row for row in edgelist if row[1] in keep]
 
+def _collapse_edgelist_tf_gene_pairs(edgelist):
+    """
+    Collapse repeated TF->gene rows in an edgelist before visualization.
+    """
+    adj = {}
+    for row in edgelist:
+        if len(row) < 3:
+            continue
+        tf = row[0]
+        gene = row[1]
+        edge = (gene, *row[2:])
+        adj.setdefault(tf, []).append(edge)
+
+    collapsed_adj = gu.aggregate_tf_gene_edges(adj, weight_agg="mean")
+
+    collapsed = []
+    for tf, edges in sorted(collapsed_adj.items(), key=lambda kv: str(kv[0])):
+        for edge in edges:
+            collapsed.append([tf, edge[0], *edge[1:]])
+    return collapsed
+
 def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_degs=None): # option to make not directed so it resembles a co expression net
     """
     Visualize a Gene Regulatory Network (GRN) stored as an adjacency list.
@@ -110,6 +133,7 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_d
           top_degs > keep genes with largest |log2fc|, then lowest pval
     """
 
+    adjlist = gu.aggregate_tf_gene_edges(adjlist, weight_agg="mean")
     adjlist = _top_tfs_adjlist(adjlist, top_tfs)
     adjlist = _top_degs_adjlist(adjlist, top_degs)
     G = Network(directed=directed)
@@ -125,8 +149,9 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_d
             gene = edge[0]
             weight = edge[1] if len(edge) > 1 else None
 
-            log2fc = edge[7] if len(edge) > 7 else None
-            pval = edge[8] if len(edge) > 8 else None
+            # adjlist edge format: (gene, weight, disorder, study, year, tissue, log2fc, pval)
+            log2fc = edge[6] if len(edge) > 6 else None
+            pval = edge[7] if len(edge) > 7 else None
 
             node_info.setdefault(gene, {
                 "type": "Gene",
@@ -192,12 +217,13 @@ def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None): # constructed usi
           TF nodes     > triangle
           Gene nodes   > circle
           Node size    >  log10(pval)
-          Node outline color  > disorder
-          Node fill color  > log2fc (red up / blue down)
+          Node color   > log2fc (red up / blue down)
     Filtering:
           top_tfs  > keep TFs with most targets
           top_degs > keep genes with largest |log2fc|, then lowest pval
     """
+
+    edgelist = _collapse_edgelist_tf_gene_pairs(edgelist)
 
     if top_tfs is not None:
         tf_counts = {}
@@ -217,34 +243,17 @@ def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None): # constructed usi
         tf = row[0]
         gene = row[1]
 
-        weight = row[2] if len(row) > 2 else None
-        disorder = row[3] if len(row) > 3 else None
         log2fc = row[7] if len(row) > 7 else None
         pval = row[8] if len(row) > 8 else None
 
         # TF node
-        node_info.setdefault(tf, {
-            "type": "TF",
-            "disorder": disorder,
-            "log2fc": log2fc,
-            "pval": pval})
+        node_info.setdefault(tf, {"type": "TF"})
 
         # Gene node
         node_info.setdefault(gene, {
             "type": "Gene",
-            "disorder": disorder,
             "log2fc": log2fc,
             "pval": pval})
-
-    # Disorder → outline color map
-    disorders = sorted({
-        info["disorder"]
-        for info in node_info.values()
-        if info["disorder"] is not None})
-
-    palette = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33","#a65628", "#f781bf"]
-
-    disorder_color = {d: palette[i % len(palette)] for i, d in enumerate(disorders)}
 
     # Add nodes with styling
 
@@ -255,32 +264,24 @@ def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None): # constructed usi
 
         # size from pval
         size = 20
-        if info["pval"] is not None and info["pval"] > 0:
-            import math
+        if info.get("pval") is not None and info["pval"] > 0:
             size = 10 + (-math.log10(info["pval"]) * 6)
             size = max(8, min(60, size))
 
-        # fill color from log2fc
-        fill = "#cccccc"
-        if info["log2fc"] is not None:
+        # color from log2fc
+        color = "#cccccc"
+        if info.get("log2fc") is not None:
             if info["log2fc"] > 0:
-                fill = "#d73027"   # upregulated
+                color = "#d73027"   # upregulated
             elif info["log2fc"] < 0:
-                fill = "#4575b4"   # downregulated
-
-        # outline color from disorder
-        border = disorder_color.get(info["disorder"], "#000000")
+                color = "#4575b4"   # downregulated
 
         G.add_node(
             n,
             label=n,
             shape=shape,
             size=size,
-            color={
-                "background": fill,
-                "border": border
-            },
-            borderWidth=3
+            color=color,
         )
 
     # Add edge weight representations

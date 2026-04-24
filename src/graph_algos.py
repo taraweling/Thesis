@@ -1,12 +1,19 @@
 import csv # do i need this?
 from pyvis.network import Network as net
 import networkx as nx
+from networkx.algorithms import bipartite as nx_bipartite
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import math
+
+try:
+    from scipy.stats import mannwhitneyu
+except Exception:
+    mannwhitneyu = None
 
 # Helpers
 
@@ -899,6 +906,467 @@ def adjlist_stats(adjlist):
         "frac_up_log2fc": pos / total if total else 0,
         "frac_down_log2fc": neg / total if total else 0,
     }
+
+# Bipartite GRN metrics (directed, weighted)
+
+def _iter_weighted_edges(adjlist):
+    """
+    Yield (tf, gene, weight) triples from an adjacency list.
+    Supports edge rows with extra metadata.
+    """
+    for tf, edges in adjlist.items():
+        for edge in edges:
+            if not isinstance(edge, (list, tuple)) or len(edge) < 2:
+                continue
+            gene = edge[0]
+            try:
+                weight = float(edge[1])
+            except (TypeError, ValueError):
+                continue
+            yield tf, gene, weight
+
+def grn_to_bipartite_digraph(adjlist, aggregate="max_abs"):
+    """
+    Build a directed bipartite graph from {TF: [(gene, weight, ...), ...]}.
+    Duplicate TF->gene edges are aggregated to avoid duplicated disorder rows
+    inflating graph measures.
+
+    Important: TF and gene identifiers can overlap in GRNs (same symbol used
+    as regulator and as target). To preserve strict bipartite structure for
+    NetworkX bipartite algorithms, nodes are represented with typed IDs:
+      ("TF", tf_id) and ("Gene", gene_id).
+    """
+    tf_nodes = set(adjlist.keys())
+    gene_nodes = set()
+    edge_weights = {}
+    edge_counts = {}
+
+    for tf, gene, weight in _iter_weighted_edges(adjlist):
+        gene_nodes.add(gene)
+        key = (tf, gene)
+        edge_counts[key] = edge_counts.get(key, 0) + 1
+        if key not in edge_weights:
+            edge_weights[key] = weight
+            continue
+        if aggregate == "sum_abs":
+            edge_weights[key] += abs(weight)
+        elif aggregate == "mean":
+            c = edge_counts[key]
+            prev = edge_weights[key]
+            edge_weights[key] = prev + (weight - prev) / c
+        else:
+            if abs(weight) > abs(edge_weights[key]):
+                edge_weights[key] = weight
+
+    G = nx.DiGraph()
+    tf_node_ids = {("TF", tf) for tf in tf_nodes}
+    gene_node_ids = {("Gene", gene) for gene in gene_nodes}
+
+    for tf_id in tf_node_ids:
+        G.add_node(tf_id, bipartite=0, kind="TF", label=tf_id[1])
+    for gene_id in gene_node_ids:
+        G.add_node(gene_id, bipartite=1, kind="Gene", label=gene_id[1])
+
+    for (tf, gene), weight in edge_weights.items():
+        abs_weight = abs(weight)
+        if abs_weight <= 0:
+            distance = float("inf")
+        else:
+            distance = 1.0 / abs_weight
+        G.add_edge(
+            ("TF", tf),
+            ("Gene", gene),
+            weight=weight,
+            abs_weight=abs_weight,
+            distance=distance,
+        )
+    return G, tf_node_ids, gene_node_ids
+
+def _metric_partition(metric_map, tf_nodes, gene_nodes):
+    tf_vals = [metric_map[n] for n in tf_nodes if n in metric_map]
+    gene_vals = [metric_map[n] for n in gene_nodes if n in metric_map]
+    return tf_vals, gene_vals
+
+def _clean_numeric(values):
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        return arr
+    return arr[np.isfinite(arr)]
+
+def weighted_node_degree(weighted_adjlist, node, mode="total"):
+    """
+    Weighted degree for directed bipartite GRNs.
+      mode='out'   => outgoing abs-weight sum
+      mode='in'    => incoming abs-weight sum
+      mode='total' => in + out abs-weight sum
+    """
+    G, _, _ = grn_to_bipartite_digraph(weighted_adjlist)
+    node_id = node
+    if node_id not in G:
+        tf_id = ("TF", node)
+        gene_id = ("Gene", node)
+        if tf_id in G and gene_id in G:
+            node_id = None
+        elif tf_id in G:
+            node_id = tf_id
+        elif gene_id in G:
+            node_id = gene_id
+        else:
+            return 0.0
+
+    def _node_val(n):
+        if mode == "out":
+            return float(G.out_degree(n, weight="abs_weight"))
+        if mode == "in":
+            return float(G.in_degree(n, weight="abs_weight"))
+        return float(
+            G.out_degree(n, weight="abs_weight")
+            + G.in_degree(n, weight="abs_weight")
+        )
+
+    if node_id is None:
+        # Identifier appears in both TF and Gene partitions; combine both roles.
+        return _node_val(("TF", node)) + _node_val(("Gene", node))
+    return _node_val(node_id)
+
+def weighted_node_degree_stats(weighted_adjlist, mode="total"):
+    G, _, _ = grn_to_bipartite_digraph(weighted_adjlist)
+    vals = [
+        weighted_node_degree(weighted_adjlist, node, mode=mode)
+        for node in G.nodes
+    ]
+    return {
+        "values": vals,
+        "mean": _safe_mean(vals),
+        "median": _safe_median(vals),
+        "min": min(vals) if vals else 0.0,
+        "max": max(vals) if vals else 0.0,
+    }
+
+def closeness_centralities(weighted_adj_list, mode="out"):
+    """
+    Weighted closeness using reciprocal edge-strength as distance.
+    For directed graphs:
+      mode='out' computes outward reachability centrality.
+      mode='in' computes inward reachability centrality.
+    """
+    G, _, _ = grn_to_bipartite_digraph(weighted_adj_list)
+    if G.number_of_nodes() == 0:
+        return {}
+    H = G.reverse(copy=False) if mode == "out" else G
+    return nx.closeness_centrality(H, distance="distance", wf_improved=True)
+
+def eccentricity_centralities(weighted_adj_list, mode="out"):
+    """
+    Reciprocal eccentricity (1/max shortest-path distance) with weighted edges.
+    Unreachable-only nodes return 0.0.
+    """
+    G, _, _ = grn_to_bipartite_digraph(weighted_adj_list)
+    if G.number_of_nodes() == 0:
+        return {}
+    H = G if mode == "out" else G.reverse(copy=False)
+    ecc = {}
+    for node in H.nodes:
+        lengths = nx.single_source_dijkstra_path_length(
+            H,
+            node,
+            weight="distance",
+        )
+        finite = [
+            d for target, d in lengths.items()
+            if target != node and np.isfinite(d)
+        ]
+        if not finite:
+            ecc[node] = 0.0
+        else:
+            ecc[node] = 1.0 / max(finite)
+    return ecc
+
+def betweenness_centralities(weighted_adj_list, normalized=True):
+    G, _, _ = grn_to_bipartite_digraph(weighted_adj_list)
+    if G.number_of_nodes() == 0:
+        return {}
+    return nx.betweenness_centrality(
+        G,
+        normalized=normalized,
+        weight="distance",
+    )
+
+def calculate_bipartite_clustering_coeff(weighted_adjlist):
+    """
+    Bipartite clustering for a TF-gene graph.
+    Uses the bipartite overlap coefficient (networkx bipartite.clustering).
+    """
+    G, _, _ = grn_to_bipartite_digraph(weighted_adjlist)
+    if G.number_of_nodes() == 0:
+        return {}
+
+    U = nx.Graph()
+    U.add_nodes_from(G.nodes(data=True))
+    U.add_edges_from((u, v) for u, v in G.edges())
+
+    coeffs = nx_bipartite.clustering(U, mode="dot")
+    for node in U.nodes():
+        coeffs.setdefault(node, 0.0)
+    return coeffs
+
+def stat_test(group_a, group_b):
+    """
+    Mann-Whitney U test plus Cliff's delta effect size.
+    """
+    a = _clean_numeric(group_a)
+    b = _clean_numeric(group_b)
+
+    if a.size == 0 or b.size == 0:
+        return {
+            "U_statistic": float("nan"),
+            "p_value": float("nan"),
+            "cliffs_delta": float("nan"),
+            "a_median": float("nan"),
+            "b_median": float("nan"),
+            "a_mean": float("nan"),
+            "b_mean": float("nan"),
+            "n_a": int(a.size),
+            "n_b": int(b.size),
+        }
+
+    if mannwhitneyu is None:
+        U = float("nan")
+        p_val = float("nan")
+    else:
+        U, p_val = mannwhitneyu(a, b, alternative="two-sided")
+
+    greater = 0
+    less = 0
+    for val in a:
+        greater += np.sum(val > b)
+        less += np.sum(val < b)
+    cliff_delta = (greater - less) / (len(a) * len(b))
+
+    return {
+        "U_statistic": float(U) if np.isfinite(U) else U,
+        "p_value": float(p_val) if np.isfinite(p_val) else p_val,
+        "cliffs_delta": float(cliff_delta),
+        "a_median": float(np.median(a)),
+        "b_median": float(np.median(b)),
+        "a_mean": float(np.mean(a)),
+        "b_mean": float(np.mean(b)),
+        "n_a": int(len(a)),
+        "n_b": int(len(b)),
+    }
+
+def _probability_curve(values, bins=30):
+    arr = _clean_numeric(values)
+    if arr.size == 0:
+        return np.array([]), np.array([])
+    bin_count = min(bins, max(5, int(np.sqrt(arr.size) * 2)))
+    counts, edges = np.histogram(arr, bins=bin_count)
+    total = counts.sum()
+    probs = counts / total if total else counts
+    centers = (edges[:-1] + edges[1:]) / 2.0
+    return centers, probs
+
+def compare_dist(group_a, group_b, metric_name, outfile, label_a="TF", label_b="Gene"):
+    """
+    Plot two normalized metric distributions as probability curves.
+    """
+    x_a, y_a = _probability_curve(group_a)
+    x_b, y_b = _probability_curve(group_b)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    if x_a.size > 0:
+        ax.plot(x_a, y_a, label=label_a, color="red")
+    if x_b.size > 0:
+        ax.plot(x_b, y_b, label=label_b, color="blue")
+    ax.set_xlabel(metric_name)
+    ax.set_ylabel("Probability")
+    ax.set_title(f"{metric_name} Distribution Comparison")
+    if ax.lines:
+        ax.legend()
+    else:
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+    fig.savefig(outfile)
+    plt.close(fig)
+
+def bipartite_metric_distributions(weighted_adjlist):
+    """
+    Return run1-style metric distributions adapted for a directed,
+    weighted bipartite GRN.
+    """
+    G, tf_nodes, gene_nodes = grn_to_bipartite_digraph(weighted_adjlist)
+    if G.number_of_nodes() == 0:
+        return {
+            "Strength": {"TF": [], "Gene": []},
+            "Clustering_Coefficient": {"TF": [], "Gene": []},
+            "Closeness_Centrality": {"TF": [], "Gene": []},
+            "Eccentricity_Centrality": {"TF": [], "Gene": []},
+            "Betweenness": {"TF": [], "Gene": []},
+        }
+
+    strength_map = {}
+    for node in G.nodes:
+        strength_map[node] = float(
+            G.in_degree(node, weight="abs_weight")
+            + G.out_degree(node, weight="abs_weight")
+        )
+
+    clust_map = calculate_bipartite_clustering_coeff(weighted_adjlist)
+    close_map = closeness_centralities(weighted_adjlist, mode="out")
+    ecc_map = eccentricity_centralities(weighted_adjlist, mode="out")
+    betw_map = betweenness_centralities(weighted_adjlist, normalized=True)
+
+    tf_strength, gene_strength = _metric_partition(strength_map, tf_nodes, gene_nodes)
+    tf_clust, gene_clust = _metric_partition(clust_map, tf_nodes, gene_nodes)
+    tf_close, gene_close = _metric_partition(close_map, tf_nodes, gene_nodes)
+    tf_ecc, gene_ecc = _metric_partition(ecc_map, tf_nodes, gene_nodes)
+    tf_betw, gene_betw = _metric_partition(betw_map, tf_nodes, gene_nodes)
+
+    return {
+        "Strength": {"TF": tf_strength, "Gene": gene_strength},
+        "Clustering_Coefficient": {"TF": tf_clust, "Gene": gene_clust},
+        "Closeness_Centrality": {"TF": tf_close, "Gene": gene_close},
+        "Eccentricity_Centrality": {"TF": tf_ecc, "Gene": gene_ecc},
+        "Betweenness": {"TF": tf_betw, "Gene": gene_betw},
+    }
+
+def _plot_metric_panels(metric_data, disorder_name, boxplot_file, violinplot_file):
+    order = [
+        "Strength",
+        "Clustering_Coefficient",
+        "Closeness_Centrality",
+        "Eccentricity_Centrality",
+        "Betweenness",
+    ]
+    labels = {
+        "Strength": "Strength",
+        "Clustering_Coefficient": "Clust. Coeff.",
+        "Closeness_Centrality": "Closeness",
+        "Eccentricity_Centrality": "Eccentricity",
+        "Betweenness": "Betweenness",
+    }
+    colors = ["lightcoral", "gold", "yellowgreen", "skyblue", "mediumpurple"]
+
+    def _plot_ready(vals):
+        arr = _clean_numeric(vals)
+        if arr.size == 0:
+            return [np.nan], False
+        return arr.tolist(), True
+
+    fig1, axs = plt.subplots(1, 5, figsize=(20, 4), layout="constrained")
+    for i, metric in enumerate(order):
+        tf_vals, tf_ok = _plot_ready(metric_data[metric]["TF"])
+        gene_vals, gene_ok = _plot_ready(metric_data[metric]["Gene"])
+        values = [tf_vals, gene_vals]
+        if tf_ok or gene_ok:
+            axs[i].boxplot(
+                values,
+                labels=["TF", "Gene"],
+                patch_artist=True,
+                boxprops={"facecolor": colors[i]},
+            )
+        else:
+            axs[i].text(0.5, 0.5, "No data", ha="center", va="center", transform=axs[i].transAxes)
+            axs[i].set_xticks([1, 2], ["TF", "Gene"])
+        axs[i].set_title(labels[metric])
+    fig1.suptitle(f"{disorder_name}: Boxplots of Bipartite Network Measures")
+    fig1.savefig(boxplot_file)
+    plt.close(fig1)
+
+    fig2, axs = plt.subplots(1, 5, figsize=(20, 4), layout="constrained")
+    for i, metric in enumerate(order):
+        tf_vals, tf_ok = _plot_ready(metric_data[metric]["TF"])
+        gene_vals, gene_ok = _plot_ready(metric_data[metric]["Gene"])
+        values = [tf_vals, gene_vals]
+        if tf_ok or gene_ok:
+            axs[i].violinplot(values, showmeans=False, showmedians=True)
+        else:
+            axs[i].text(0.5, 0.5, "No data", ha="center", va="center", transform=axs[i].transAxes)
+        axs[i].set_title(labels[metric])
+        axs[i].set_xticks([1, 2], ["TF", "Gene"])
+    fig2.suptitle(f"{disorder_name}: Violin Plots of Bipartite Network Measures")
+    fig2.savefig(violinplot_file)
+    plt.close(fig2)
+
+def disorder_bipartite_report(adjlist, disorder_name, outdir="results"):
+    """
+    Compute run1-style statistics/visualizations for one disorder GRN.
+    Returns a structured report with metric distributions, statistical tests,
+    and output file paths.
+    """
+    metric_data = bipartite_metric_distributions(adjlist)
+    os.makedirs(outdir, exist_ok=True)
+
+    boxplot_file = os.path.join(outdir, f"{disorder_name.lower()}_bipartite_boxplots.png")
+    violinplot_file = os.path.join(outdir, f"{disorder_name.lower()}_bipartite_violinplots.png")
+    _plot_metric_panels(metric_data, disorder_name, boxplot_file, violinplot_file)
+
+    stat_results = {}
+    distribution_files = {}
+    summary = {}
+
+    for metric, groups in metric_data.items():
+        tf_vals = groups["TF"]
+        gene_vals = groups["Gene"]
+        stat_results[metric] = stat_test(tf_vals, gene_vals)
+
+        metric_slug = metric.lower()
+        dist_file = os.path.join(outdir, f"{disorder_name.lower()}_{metric_slug}_distribution.png")
+        compare_dist(tf_vals, gene_vals, metric, dist_file, label_a="TF", label_b="Gene")
+        distribution_files[metric] = dist_file
+
+        tf_arr = _clean_numeric(tf_vals)
+        gene_arr = _clean_numeric(gene_vals)
+        summary[f"{metric_slug}_tf_mean"] = float(np.mean(tf_arr)) if tf_arr.size else 0.0
+        summary[f"{metric_slug}_gene_mean"] = float(np.mean(gene_arr)) if gene_arr.size else 0.0
+        summary[f"{metric_slug}_tf_median"] = float(np.median(tf_arr)) if tf_arr.size else 0.0
+        summary[f"{metric_slug}_gene_median"] = float(np.median(gene_arr)) if gene_arr.size else 0.0
+        summary[f"{metric_slug}_p_value"] = stat_results[metric]["p_value"]
+        summary[f"{metric_slug}_cliffs_delta"] = stat_results[metric]["cliffs_delta"]
+
+    return {
+        "metric_data": metric_data,
+        "stats": stat_results,
+        "summary": summary,
+        "boxplot_file": boxplot_file,
+        "violinplot_file": violinplot_file,
+        "distribution_files": distribution_files,
+    }
+
+def disorder_bipartite_summary_row(name, report):
+    """
+    Flatten a disorder_bipartite_report into CSV-safe fields.
+    """
+    row = {"disorder": name}
+    if not report:
+        return row
+    for key, value in report.get("summary", {}).items():
+        row[f"bip_{key}"] = value
+    row["bip_boxplot_file"] = report.get("boxplot_file", "")
+    row["bip_violinplot_file"] = report.get("violinplot_file", "")
+    return row
+
+def disorder_bipartite_stat_rows(name, report):
+    """
+    Expanded per-metric table for one disorder's bipartite comparisons.
+    """
+    rows = []
+    if not report:
+        return rows
+    for metric, stats in report.get("stats", {}).items():
+        rows.append({
+            "disorder": name,
+            "metric": metric,
+            "u_statistic": stats.get("U_statistic"),
+            "p_value": stats.get("p_value"),
+            "cliffs_delta": stats.get("cliffs_delta"),
+            "tf_mean": stats.get("a_mean"),
+            "gene_mean": stats.get("b_mean"),
+            "tf_median": stats.get("a_median"),
+            "gene_median": stats.get("b_median"),
+            "n_tf": stats.get("n_a"),
+            "n_gene": stats.get("n_b"),
+        })
+    return rows
 
 def disorder_summary_row(
     name,

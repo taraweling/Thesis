@@ -4,7 +4,7 @@ This repository analyzes cross-disorder differential expression in the context o
 It combines:
 
 1. Tissue-specific GRN matrices (PANDA/GRAND-derived; bipartite TF -> target edges)
-2. Cross-study DEG tables for psychiatric/neurologic disorders
+2. Cross-study table showing psychiatric disorders
 3. Python graph filtering/scoring/visualization
 4. R-based enrichment, overlap, and meta-disorder analyses
 
@@ -18,11 +18,11 @@ It combines:
 - `src/thesisp1.R`: primary R analysis pipeline (enrichment, GSEA, overlap tests, networks).
 - `src/p1thesis.R`: older/alternate thesis pipeline version.
 - `src/p1permutationtest.R`: standalone permutation overlap test script.
-- `src/p1deganalysis.R`, `src/p1geneontology.R`, `src/p1venndiagrams.R`, `src/wingodatasetanalysis.R`: exploratory/auxiliary analysis scripts.
+- `src/p1deganalysis.R`, `src/p1geneontology.R`, `src/p1venndiagrams.R`, `src/wingodatasetanalysis.R`: past exploratory/auxiliary analysis scripts.
 - `src/data/`: input data files.
 - `src/results/`: generated figures, tables, and HTML network visualizations.
 - `src/lib/`: vendored JS/CSS assets used by HTML network outputs.
-- `src/run_merge.sbatch`: SLURM wrapper to run `run.py`.
+- `src/run_merge.sbatch`: SLURM wrapper to run random walks 
 
 ## Data Inputs
 

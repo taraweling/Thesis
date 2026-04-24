@@ -3,6 +3,7 @@ import csv
 import requests
 import math
 import re # use regex
+import os
 from collections import defaultdict
 import numpy as np
 from requests.adapters import HTTPAdapter
@@ -51,6 +52,11 @@ def _request(method, url, **kwargs):
 ENSEMBL_ID_RE = re.compile(r"^ENSG\d+$")
 LOC_RE = re.compile(r"(chr)?(\w+):(\d+) (\d+)") # regex
 XLOC_RE = re.compile(r"XLOC_\d+")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WALKER_MASTER_DIR = os.path.join(BASE_DIR, "Walker-master")
+WALKER_INPUT_PPI_DIR = os.path.join(WALKER_MASTER_DIR, "input_ppi")
+WALKER_INPUT_SEED_DIR = os.path.join(WALKER_MASTER_DIR, "input_seed")
 
 # purpose of gene2ensembl vs ensemblify: single lookups, debugging, 
 def gene2ensembl(query:str | None): # used chatgpt to complete loc_match portion of code 
@@ -448,7 +454,7 @@ def adjlist2adjmat(adjlist:dict): # works for weighted adjlist. if including adj
 
     return adjmat
 
-def adjlist2edgelist(adjlist:dict):
+def adjlist2edgelist(adjlist:dict, collapse_pairs: bool = True, weight_agg: str = "mean"):
     
     """
     Convert a directed adjacency list into a directed edge list,
@@ -468,11 +474,17 @@ def adjlist2edgelist(adjlist:dict):
       [[TF, Gene, weight], ...]
       OR
       [[TF, Gene, weight, disorder, study, year, tissue, log2fc, pval], ...]
+
+    By default, repeated TF->gene rows are collapsed before conversion so each
+    TF-gene pair appears once.
     """
+
+    if collapse_pairs:
+        adjlist = aggregate_tf_gene_edges(adjlist, weight_agg=weight_agg)
 
     edgelist = []
 
-    for tf, edges in adjlist.items():
+    for tf, edges in sorted(adjlist.items(), key=lambda kv: str(kv[0])):
         for edge in edges:
 
             # minimal case: (Gene, weight)
@@ -488,6 +500,170 @@ def adjlist2edgelist(adjlist:dict):
 
     
     return edgelist
+
+def aggregate_tf_gene_edges(adjlist, weight_agg="mean"):
+    """
+    Aggregate duplicate TF->gene rows within a single adjacency list.
+
+    Supported edge formats:
+      1) (gene, weight)
+      2) (gene, weight, disorder, study, year, tissue, log2fc, pval)
+
+    For annotated edges:
+      - weight is aggregated (default mean)
+      - log2fc is aggregated by mean
+      - pval is aggregated by minimum
+      - categorical metadata is taken from a representative row
+        (the one with smallest pval when available)
+    """
+    grouped = {}
+
+    for tf, edges in adjlist.items():
+        for edge in edges:
+            if not isinstance(edge, (list, tuple)) or len(edge) < 2:
+                continue
+            gene = edge[0]
+            try:
+                weight = float(edge[1])
+            except (TypeError, ValueError):
+                continue
+
+            key = (tf, gene)
+            if key not in grouped:
+                grouped[key] = {
+                    "weights": [],
+                    "rows": [],
+                    "log2fcs": [],
+                    "pvals": [],
+                }
+            grouped[key]["weights"].append(weight)
+            grouped[key]["rows"].append(edge)
+
+            if len(edge) > 6:
+                try:
+                    grouped[key]["log2fcs"].append(float(edge[6]))
+                except (TypeError, ValueError):
+                    pass
+            if len(edge) > 7:
+                try:
+                    grouped[key]["pvals"].append(float(edge[7]))
+                except (TypeError, ValueError):
+                    pass
+
+    new_adj = {}
+    for (tf, gene), info in grouped.items():
+        weights = info["weights"]
+        if weight_agg == "max_abs":
+            agg_weight = max(weights, key=abs)
+        elif weight_agg == "sum":
+            agg_weight = float(sum(weights))
+        else:
+            agg_weight = float(np.mean(weights))
+
+        rows = info["rows"]
+        has_metadata = any(len(r) > 2 for r in rows)
+
+        if not has_metadata:
+            new_edge = (gene, agg_weight)
+        else:
+            # representative row: smallest p-value when present, otherwise first
+            rep = rows[0]
+            rep_p = float("inf")
+            for r in rows:
+                if len(r) > 7:
+                    try:
+                        p = float(r[7])
+                        if p < rep_p:
+                            rep_p = p
+                            rep = r
+                    except (TypeError, ValueError):
+                        continue
+
+            disorder = rep[2] if len(rep) > 2 else ""
+            study = rep[3] if len(rep) > 3 else ""
+            year = rep[4] if len(rep) > 4 else ""
+            tissue = rep[5] if len(rep) > 5 else ""
+            agg_log2fc = float(np.mean(info["log2fcs"])) if info["log2fcs"] else (rep[6] if len(rep) > 6 else 0.0)
+            agg_pval = float(min(info["pvals"])) if info["pvals"] else (rep[7] if len(rep) > 7 else 1.0)
+
+            new_edge = (gene, agg_weight, disorder, study, year, tissue, agg_log2fc, agg_pval)
+
+        new_adj.setdefault(tf, []).append(new_edge)
+
+    # deterministic ordering by target gene for stable outputs
+    for tf in new_adj:
+        new_adj[tf] = sorted(new_adj[tf], key=lambda e: str(e[0]))
+
+    return new_adj
+
+
+def write_weighted_edgelist_txt(adjlist, outfile, collapse_pairs: bool = True, weight_agg: str = "mean"):
+    """
+    Save an adjacency list as a weighted edge list text file:
+    TF<TAB>Gene<TAB>Weight
+
+    By default, repeated TF->gene rows are collapsed before writing.
+    """
+    if collapse_pairs:
+        adjlist = aggregate_tf_gene_edges(adjlist, weight_agg=weight_agg)
+
+    out_dir = os.path.dirname(outfile)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    with open(outfile, "w") as f:
+        for tf, edges in sorted(adjlist.items(), key=lambda kv: str(kv[0])):
+            for edge in edges:
+                if len(edge) < 2:
+                    continue
+                gene, weight = edge[0], edge[1]
+                f.write(f"{tf}\t{gene}\t{weight}\n")
+
+
+def write_walker_ppi(adjlist, outfile, collapse_pairs: bool = True, weight_agg: str = "mean"):
+    """
+    Write an undirected weighted .ppi file compatible with Walker.
+
+    Walker reads the input network with networkx.Graph(), so repeated and
+    opposite-direction edges are collapsed into one pair. We first collapse
+    repeated TF->gene rows, then keep the maximum observed weight for each
+    undirected pair.
+    """
+    if collapse_pairs:
+        adjlist = aggregate_tf_gene_edges(adjlist, weight_agg=weight_agg)
+
+    edge_weights = {}
+    for tf, edges in adjlist.items():
+        tf_node = str(tf).strip()
+        if not tf_node:
+            continue
+        for edge in edges:
+            if len(edge) < 2:
+                continue
+            gene_node = str(edge[0]).strip()
+            if not gene_node:
+                continue
+            try:
+                weight = float(edge[1])
+            except (TypeError, ValueError):
+                continue
+
+            if tf_node == gene_node:
+                key = (tf_node, gene_node)
+            else:
+                key = tuple(sorted((tf_node, gene_node)))
+
+            prev_weight = edge_weights.get(key)
+            if prev_weight is None or weight > prev_weight:
+                edge_weights[key] = weight
+
+    out_dir = os.path.dirname(outfile)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    with open(outfile, "w") as f:
+        for (node_a, node_b), weight in sorted(edge_weights.items()):
+            f.write(f"{node_a}\t{node_b}\t{weight:.10f}\n")
 
 def merge_adjlist(*oldgraph):
     """
@@ -931,6 +1107,37 @@ def detect_regulatory_loops(degs, grn_by_name, graph_label="grn"):
 
     return ffl_by_name, fbl_by_name, ffl_rows, fbl_rows
 
+def save_adj_list_as_txt(adj_list, filename, include_tfs=False):
+    """
+    Save an adjacency list as a Walker seed text file (one ID per line).
+
+    Args:
+        adj_list (dict): adjacency list in the form {TF: [(Gene, ...), ...]}.
+        filename (str): output .txt path.
+        include_tfs (bool): when True, include TF keys in addition to targets.
+    """
+    seed_nodes = set()
+
+    for tf, edges in adj_list.items():
+        tf_node = str(tf).strip()
+        if include_tfs and tf_node:
+            seed_nodes.add(tf_node)
+
+        for edge in edges:
+            if not isinstance(edge, (list, tuple)) or len(edge) < 1:
+                continue
+            gene_node = str(edge[0]).strip()
+            if gene_node:
+                seed_nodes.add(gene_node)
+
+    out_dir = os.path.dirname(filename)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    with open(filename, "w") as f:
+        for node in sorted(seed_nodes):
+            f.write(f"{node}\n")
+    
 def expand_node_attributes(adjlist:dict, genes:list): # UNFINISHED
     """
     Placeholder for future node attribute expansion logic.
