@@ -43,12 +43,6 @@
              
 
              
-             #config {
-                 float: left;
-                 width: 400px;
-                 height: 600px;
-             }
-             
 
              
         </style>
@@ -63,8 +57,6 @@
         </div>
 
         
-        
-            <div id="config"></div>
         
 
         <script type="text/javascript">
@@ -96,8 +88,8 @@
                   
 
                   // parsing and collecting nodes and edges from the python
-                  nodes = new vis.DataSet([{"color": "#cccccc", "id": "ENSG00000119508", "label": "ENSG00000119508", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000087116", "label": "ENSG00000087116", "shape": "circle", "size": 41.039664878986045}, {"color": "#4575b4", "id": "ENSG00000106809", "label": "ENSG00000106809", "shape": "circle", "size": 38.92613831624098}, {"color": "#4575b4", "id": "ENSG00000120129", "label": "ENSG00000120129", "shape": "circle", "size": 57.92297665176897}, {"color": "#d73027", "id": "ENSG00000159216", "label": "ENSG00000159216", "shape": "circle", "size": 44.18082365547707}, {"color": "#cccccc", "id": "ENSG00000135363", "label": "ENSG00000135363", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000099958", "label": "ENSG00000099958", "shape": "circle", "size": 45.35674018211279}, {"color": "#4575b4", "id": "ENSG00000153234", "label": "ENSG00000153234", "shape": "circle", "size": 50.23320264303044}, {"color": "#4575b4", "id": "ENSG00000169245", "label": "ENSG00000169245", "shape": "circle", "size": 35.74947459919172}, {"color": "#4575b4", "id": "ENSG00000187848", "label": "ENSG00000187848", "shape": "circle", "size": 29.759693305979447}, {"color": "#4575b4", "id": "ENSG00000095585", "label": "ENSG00000095585", "shape": "circle", "size": 39.75164388905065}, {"color": "#cccccc", "id": "ENSG00000170345", "label": "ENSG00000170345", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000146776", "label": "ENSG00000146776", "shape": "circle", "size": 34.423486445714246}]);
-                  edges = new vis.DataSet([{"arrows": "to", "from": "ENSG00000119508", "to": "ENSG00000087116", "value": 0.99563}, {"arrows": "to", "from": "ENSG00000119508", "to": "ENSG00000106809", "value": 5.820399999999999}, {"arrows": "to", "from": "ENSG00000119508", "to": "ENSG00000120129", "value": 3.7569}, {"arrows": "to", "from": "ENSG00000119508", "to": "ENSG00000159216", "value": 3.9078500000000003}, {"arrows": "to", "from": "ENSG00000135363", "to": "ENSG00000099958", "value": 4.45655}, {"arrows": "to", "from": "ENSG00000135363", "to": "ENSG00000153234", "value": 4.06735}, {"arrows": "to", "from": "ENSG00000135363", "to": "ENSG00000169245", "value": 2.45805}, {"arrows": "to", "from": "ENSG00000135363", "to": "ENSG00000187848", "value": 2.6294}, {"arrows": "to", "from": "ENSG00000153234", "to": "ENSG00000095585", "value": 4.864599999999999}, {"arrows": "to", "from": "ENSG00000153234", "to": "ENSG00000106809", "value": 2.2489}, {"arrows": "to", "from": "ENSG00000153234", "to": "ENSG00000169245", "value": 4.6638}, {"arrows": "to", "from": "ENSG00000170345", "to": "ENSG00000146776", "value": 4.88855}, {"arrows": "to", "from": "ENSG00000170345", "to": "ENSG00000187848", "value": 3.4256}]);
+                  nodes = new vis.DataSet([{"color": "#cccccc", "id": "ARNTL", "label": "ARNTL", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000105697", "label": "HAMP", "shape": "circle", "size": 49.28928138685426}, {"color": "#d73027", "id": "ENSG00000115602", "label": "IL1RL1", "shape": "circle", "size": 43.6332899150427}, {"color": "#4575b4", "id": "ENSG00000169245", "label": "CXCL10", "shape": "circle", "size": 35.74947459919172}, {"color": "#cccccc", "id": "ATOH8", "label": "ATOH8", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000099958", "label": "DERL3", "shape": "circle", "size": 45.35674018211279}, {"color": "#4575b4", "id": "ENSG00000163817", "label": "SLC6A20", "shape": "circle", "size": 41.674085535077566}, {"color": "#d73027", "id": "ENSG00000273259", "label": "ENSG00000273259", "shape": "circle", "size": 38.74290991274422}, {"color": "#cccccc", "id": "BARX2", "label": "BARX2", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000187848", "label": "P2RX2", "shape": "circle", "size": 29.759693305979447}, {"color": "#cccccc", "id": "BBX", "label": "BBX", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000255173", "label": "ENSG00000255173", "shape": "circle", "size": 38.79161725407729}, {"color": "#cccccc", "id": "BCL6", "label": "BCL6", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "BHLHA15", "label": "BHLHA15", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000123358", "label": "NR4A1", "shape": "circle", "size": 60}, {"color": "#cccccc", "id": "BPTF", "label": "BPTF", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "FOXM1", "label": "FOXM1", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000259207", "label": "ITGB3", "shape": "circle", "size": 40.13640272543624}, {"color": "#cccccc", "id": "FOXP1", "label": "FOXP1", "shape": "triangle", "size": 20}]);
+                  edges = new vis.DataSet([{"arrows": "to", "from": "ARNTL", "to": "ENSG00000105697", "value": 4.60015}, {"arrows": "to", "from": "ARNTL", "to": "ENSG00000115602", "value": 2.96135}, {"arrows": "to", "from": "ARNTL", "to": "ENSG00000169245", "value": 4.6427}, {"arrows": "to", "from": "ATOH8", "to": "ENSG00000099958", "value": 4.34175}, {"arrows": "to", "from": "ATOH8", "to": "ENSG00000163817", "value": 4.4247}, {"arrows": "to", "from": "ATOH8", "to": "ENSG00000273259", "value": 6.8628}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000115602", "value": 2.76295}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000187848", "value": 3.92665}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000273259", "value": 5.3844}, {"arrows": "to", "from": "BBX", "to": "ENSG00000169245", "value": 4.76205}, {"arrows": "to", "from": "BBX", "to": "ENSG00000255173", "value": 4.3142}, {"arrows": "to", "from": "BCL6", "to": "ENSG00000115602", "value": 4.5360499999999995}, {"arrows": "to", "from": "BCL6", "to": "ENSG00000169245", "value": 6.8084}, {"arrows": "to", "from": "BHLHA15", "to": "ENSG00000123358", "value": 2.33425}, {"arrows": "to", "from": "BPTF", "to": "ENSG00000123358", "value": 2.432649999999999}, {"arrows": "to", "from": "BPTF", "to": "ENSG00000187848", "value": 3.6081}, {"arrows": "to", "from": "BPTF", "to": "ENSG00000273259", "value": 3.9941}, {"arrows": "to", "from": "FOXM1", "to": "ENSG00000099958", "value": 3.19965}, {"arrows": "to", "from": "FOXM1", "to": "ENSG00000187848", "value": 4.3881499999999996}, {"arrows": "to", "from": "FOXM1", "to": "ENSG00000259207", "value": 4.2257}, {"arrows": "to", "from": "FOXP1", "to": "ENSG00000123358", "value": 5.586250000000001}, {"arrows": "to", "from": "FOXP1", "to": "ENSG00000163817", "value": 2.884}]);
 
                   nodeColors = {};
                   allNodes = nodes.get({ returnType: "Object" });
@@ -108,46 +100,11 @@
                   // adding nodes and edges to the graph
                   data = {nodes: nodes, edges: edges};
 
-                  var options = {
-    "configure": {
-        "enabled": true,
-        "filter": [
-            "physics"
-        ]
-    },
-    "edges": {
-        "color": {
-            "inherit": true
-        },
-        "smooth": {
-            "enabled": true,
-            "type": "dynamic"
-        }
-    },
-    "interaction": {
-        "dragNodes": true,
-        "hideEdgesOnDrag": false,
-        "hideNodesOnDrag": false
-    },
-    "physics": {
-        "enabled": true,
-        "stabilization": {
-            "enabled": true,
-            "fit": true,
-            "iterations": 1000,
-            "onlyDynamicEdges": false,
-            "updateInterval": 50
-        }
-    }
-};
+                  var options = {"physics": {"enabled": true, "stabilization": {"enabled": true, "iterations": 200, "updateInterval": 50, "fit": true}}, "interaction": {"hideEdgesOnDrag": true, "hideEdgesOnZoom": true}};
 
                   
 
 
-                  
-                  // if this network requires displaying the configure window,
-                  // put it in its div
-                  options.configure["container"] = document.getElementById("config");
                   
 
                   network = new vis.Network(container, data, options);

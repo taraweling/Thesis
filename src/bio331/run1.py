@@ -1,6 +1,6 @@
-from graph_class import process_data
-import graph_vis as gv 
-import graph_algos as ga 
+from distclass import process_data
+import vis as gv 
+import algos as ga 
 import p4utils as utils
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_hex # colors for graph
@@ -21,7 +21,7 @@ def main():
     e_adjlist = process_data('adjlistdata/epithelial.csv',1) # 10 most epithelial slices
     m_adjlist = process_data('adjlistdata/mesenchymal.csv',1) # 10 most mesenchymal slices
     
-    # iris's code graph_vis calls thomas's code ga
+    # iris's code vis calls thomas's code ga
     
     outfile1 = 'boxplots.png'
     outfile2 = 'violinplots.png'

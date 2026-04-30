@@ -1,0 +1,127 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        
+            <script src="lib/bindings/utils.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            
+        
+<center>
+<h1></h1>
+</center>
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+        <link
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-eOJMYsd53ii+scO/bJGFsiCZc+5NDVN2yr8+0RDqr0Ql0h+rP48ckxlpbzKgwra6"
+          crossorigin="anonymous"
+        />
+        <script
+          src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
+          crossorigin="anonymous"
+        ></script>
+
+
+        <center>
+          <h1></h1>
+        </center>
+        <style type="text/css">
+
+             #mynetwork {
+                 width: 100%;
+                 height: 600px;
+                 background-color: #ffffff;
+                 border: 1px solid lightgray;
+                 position: relative;
+                 float: left;
+             }
+
+             
+
+             
+
+             
+        </style>
+    </head>
+
+
+    <body>
+        <div class="card" style="width: 100%">
+            
+            
+            <div id="mynetwork" class="card-body"></div>
+        </div>
+
+        
+        
+
+        <script type="text/javascript">
+
+              // initialize global variables.
+              var edges;
+              var nodes;
+              var allNodes;
+              var allEdges;
+              var nodeColors;
+              var originalNodes;
+              var network;
+              var container;
+              var options, data;
+              var filter = {
+                  item : '',
+                  property : '',
+                  value : []
+              };
+
+              
+
+              
+
+              // This method is responsible for drawing the graph, returns the drawn network
+              function drawGraph() {
+                  var container = document.getElementById('mynetwork');
+
+                  
+
+                  // parsing and collecting nodes and edges from the python
+                  nodes = new vis.DataSet([{"color": "#cccccc", "id": "ARNTL", "label": "ARNTL", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000090339", "label": "ICAM1", "shape": "circle", "size": 42.01779444766211}, {"color": "#cccccc", "id": "ASCL1", "label": "ASCL1", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000110852", "label": "CLEC2B", "shape": "circle", "size": 35.09460778264131}, {"color": "#cccccc", "id": "BARX2", "label": "BARX2", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000147256", "label": "ARHGAP36", "shape": "circle", "size": 38.61730647173036}, {"color": "#4575b4", "id": "ENSG00000163132", "label": "MSX1", "shape": "circle", "size": 37.665003493812804}, {"color": "#4575b4", "id": "ENSG00000185885", "label": "IFITM1", "shape": "circle", "size": 36.97725590165692}, {"color": "#4575b4", "id": "ENSG00000206172", "label": "HBA1", "shape": "circle", "size": 36.96096980557077}, {"color": "#cccccc", "id": "BCL11A", "label": "BCL11A", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000078401", "label": "EDN1", "shape": "circle", "size": 34.057966871274395}, {"color": "#4575b4", "id": "ENSG00000244734", "label": "HBB", "shape": "circle", "size": 35.26251572701345}, {"color": "#cccccc", "id": "BHLHA15", "label": "BHLHA15", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000180660", "label": "MAB21L1", "shape": "circle", "size": 40.542663824552946}, {"color": "#cccccc", "id": "DPRX", "label": "DPRX", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000185022", "label": "MAFF", "shape": "circle", "size": 32.86929786288049}, {"color": "#cccccc", "id": "E2F7", "label": "E2F7", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "FOXM1", "label": "FOXM1", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "FOXO6", "label": "FOXO6", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "FOXP1", "label": "FOXP1", "shape": "triangle", "size": 20}]);
+                  edges = new vis.DataSet([{"arrows": "to", "from": "ARNTL", "to": "ENSG00000090339", "value": 3.73635}, {"arrows": "to", "from": "ASCL1", "to": "ENSG00000090339", "value": 2.19025}, {"arrows": "to", "from": "ASCL1", "to": "ENSG00000110852", "value": 3.5594}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000147256", "value": 3.35945}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000163132", "value": 3.9492000000000003}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000185885", "value": 3.8224}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000206172", "value": 2.9587}, {"arrows": "to", "from": "BCL11A", "to": "ENSG00000078401", "value": 3.52245}, {"arrows": "to", "from": "BCL11A", "to": "ENSG00000244734", "value": 4.155}, {"arrows": "to", "from": "BHLHA15", "to": "ENSG00000078401", "value": 4.16665}, {"arrows": "to", "from": "BHLHA15", "to": "ENSG00000090339", "value": 3.1791}, {"arrows": "to", "from": "BHLHA15", "to": "ENSG00000180660", "value": 3.2179}, {"arrows": "to", "from": "DPRX", "to": "ENSG00000185022", "value": 3.8852}, {"arrows": "to", "from": "E2F7", "to": "ENSG00000078401", "value": 2.1856999999999998}, {"arrows": "to", "from": "E2F7", "to": "ENSG00000163132", "value": 3.4768499999999998}, {"arrows": "to", "from": "FOXM1", "to": "ENSG00000163132", "value": 3.90805}, {"arrows": "to", "from": "FOXM1", "to": "ENSG00000180660", "value": 4.4742999999999995}, {"arrows": "to", "from": "FOXO6", "to": "ENSG00000090339", "value": 4.18365}, {"arrows": "to", "from": "FOXO6", "to": "ENSG00000185022", "value": 1.9787}, {"arrows": "to", "from": "FOXP1", "to": "ENSG00000110852", "value": 3.65745}, {"arrows": "to", "from": "FOXP1", "to": "ENSG00000244734", "value": 2.9737}]);
+
+                  nodeColors = {};
+                  allNodes = nodes.get({ returnType: "Object" });
+                  for (nodeId in allNodes) {
+                    nodeColors[nodeId] = allNodes[nodeId].color;
+                  }
+                  allEdges = edges.get({ returnType: "Object" });
+                  // adding nodes and edges to the graph
+                  data = {nodes: nodes, edges: edges};
+
+                  var options = {"physics": {"enabled": true, "stabilization": {"enabled": true, "iterations": 200, "updateInterval": 50, "fit": true}}, "interaction": {"hideEdgesOnDrag": true, "hideEdgesOnZoom": true}};
+
+                  
+
+
+                  
+
+                  network = new vis.Network(container, data, options);
+
+                  
+
+                  
+
+                  
+
+
+                  
+
+                  return network;
+
+              }
+              drawGraph();
+        </script>
+    </body>
+</html>

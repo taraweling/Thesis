@@ -43,12 +43,6 @@
              
 
              
-             #config {
-                 float: left;
-                 width: 400px;
-                 height: 600px;
-             }
-             
 
              
         </style>
@@ -63,8 +57,6 @@
         </div>
 
         
-        
-            <div id="config"></div>
         
 
         <script type="text/javascript">
@@ -96,8 +88,8 @@
                   
 
                   // parsing and collecting nodes and edges from the python
-                  nodes = new vis.DataSet([]);
-                  edges = new vis.DataSet([]);
+                  nodes = new vis.DataSet([{"color": "#cccccc", "id": "AIRE", "label": "AIRE", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000169402", "label": "RSPH10B2", "shape": "circle", "size": 22.22635237226011}, {"color": "#4575b4", "id": "ENSG00000171291", "label": "ZNF439", "shape": "circle", "size": 22.463335948427215}, {"color": "#4575b4", "id": "ENSG00000178809", "label": "TRIM73", "shape": "circle", "size": 22.556176906996182}, {"color": "#cccccc", "id": "ATOH8", "label": "ATOH8", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000168569", "label": "TMEM223", "shape": "circle", "size": 22.968038644066354}, {"color": "#d73027", "id": "ENSG00000170178", "label": "HOXD12", "shape": "circle", "size": 18.867918170835868}, {"color": "#cccccc", "id": "CENPB", "label": "CENPB", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000166454", "label": "ATMIN", "shape": "circle", "size": 21.07912305986845}, {"color": "#cccccc", "id": "CUX1", "label": "CUX1", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "DMRT2", "label": "DMRT2", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000175018", "label": "TEX36", "shape": "circle", "size": 25.154702415542467}, {"color": "#4575b4", "id": "ENSG00000231315", "label": "ENSG00000231315", "shape": "circle", "size": 18.647316717524582}, {"color": "#cccccc", "id": "FOXH1", "label": "FOXH1", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000175886", "label": "RPL7AP66", "shape": "circle", "size": 24.454948991310385}, {"color": "#cccccc", "id": "GATA1", "label": "GATA1", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000223975", "label": "ENSG00000223975", "shape": "circle", "size": 19.34643871263663}, {"color": "#cccccc", "id": "GSX1", "label": "GSX1", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "HIF1A", "label": "HIF1A", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "HOXC11", "label": "HOXC11", "shape": "triangle", "size": 20}]);
+                  edges = new vis.DataSet([{"arrows": "to", "from": "AIRE", "to": "ENSG00000169402", "value": 2.5596}, {"arrows": "to", "from": "AIRE", "to": "ENSG00000171291", "value": 3.5473}, {"arrows": "to", "from": "AIRE", "to": "ENSG00000178809", "value": 3.7779}, {"arrows": "to", "from": "ATOH8", "to": "ENSG00000168569", "value": 3.4151}, {"arrows": "to", "from": "ATOH8", "to": "ENSG00000170178", "value": 3.3989000000000003}, {"arrows": "to", "from": "CENPB", "to": "ENSG00000166454", "value": 3.56935}, {"arrows": "to", "from": "CENPB", "to": "ENSG00000168569", "value": 3.2230499999999997}, {"arrows": "to", "from": "CENPB", "to": "ENSG00000170178", "value": 4.615550000000001}, {"arrows": "to", "from": "CUX1", "to": "ENSG00000168569", "value": 4.6221}, {"arrows": "to", "from": "CUX1", "to": "ENSG00000171291", "value": 2.9655500000000004}, {"arrows": "to", "from": "CUX1", "to": "ENSG00000178809", "value": 2.7878}, {"arrows": "to", "from": "DMRT2", "to": "ENSG00000170178", "value": 3.49285}, {"arrows": "to", "from": "DMRT2", "to": "ENSG00000175018", "value": 5.407}, {"arrows": "to", "from": "DMRT2", "to": "ENSG00000231315", "value": 4.8841}, {"arrows": "to", "from": "FOXH1", "to": "ENSG00000166454", "value": 3.6935000000000002}, {"arrows": "to", "from": "FOXH1", "to": "ENSG00000175886", "value": 4.462149999999999}, {"arrows": "to", "from": "GATA1", "to": "ENSG00000168569", "value": 2.6950000000000003}, {"arrows": "to", "from": "GATA1", "to": "ENSG00000175886", "value": 4.20535}, {"arrows": "to", "from": "GATA1", "to": "ENSG00000223975", "value": 5.4262}, {"arrows": "to", "from": "GSX1", "to": "ENSG00000175886", "value": 4.0753}, {"arrows": "to", "from": "HIF1A", "to": "ENSG00000168569", "value": 5.6419}, {"arrows": "to", "from": "HIF1A", "to": "ENSG00000169402", "value": 3.3217}, {"arrows": "to", "from": "HIF1A", "to": "ENSG00000170178", "value": 3.6854500000000003}, {"arrows": "to", "from": "HOXC11", "to": "ENSG00000178809", "value": 4.1799}]);
 
                   nodeColors = {};
                   allNodes = nodes.get({ returnType: "Object" });
@@ -108,46 +100,11 @@
                   // adding nodes and edges to the graph
                   data = {nodes: nodes, edges: edges};
 
-                  var options = {
-    "configure": {
-        "enabled": true,
-        "filter": [
-            "physics"
-        ]
-    },
-    "edges": {
-        "color": {
-            "inherit": true
-        },
-        "smooth": {
-            "enabled": true,
-            "type": "dynamic"
-        }
-    },
-    "interaction": {
-        "dragNodes": true,
-        "hideEdgesOnDrag": false,
-        "hideNodesOnDrag": false
-    },
-    "physics": {
-        "enabled": true,
-        "stabilization": {
-            "enabled": true,
-            "fit": true,
-            "iterations": 1000,
-            "onlyDynamicEdges": false,
-            "updateInterval": 50
-        }
-    }
-};
+                  var options = {"physics": {"enabled": true, "stabilization": {"enabled": true, "iterations": 200, "updateInterval": 50, "fit": true}}, "interaction": {"hideEdgesOnDrag": true, "hideEdgesOnZoom": true}};
 
                   
 
 
-                  
-                  // if this network requires displaying the configure window,
-                  // put it in its div
-                  options.configure["container"] = document.getElementById("config");
                   
 
                   network = new vis.Network(container, data, options);

@@ -1,10 +1,69 @@
 import matplotlib.pyplot as plt
 from pyvis.network import Network
 import math
+import numpy as np
+import os
+import re
 import graph_utils as gu
 
 # Shared process-level cache for ENSG -> display label lookups.
 _GENE_LABEL_CACHE = {}
+
+
+def _inject_disable_physics_after_stabilization(html_path):
+    """
+    Patch a PyVis HTML file so physics is disabled right after initial
+    stabilization. This keeps a readable initial layout while improving
+    interaction/load responsiveness afterward.
+    """
+    if not os.path.exists(html_path):
+        return
+
+    with open(html_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Avoid duplicate injections if called multiple times.
+    if "network.setOptions({ physics: { enabled: false } });" in content:
+        return
+
+    pattern = r'(network.once\("stabilizationIterationsDone", function\(\) \{)'
+    replacement = (
+        r'\1\n'
+        r'                  network.setOptions({ physics: { enabled: false } });'
+    )
+    new_content, n = re.subn(pattern, replacement, content, count=1)
+    if n == 0:
+        return
+
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(new_content)
+
+
+def _configure_network_runtime(network_obj, interactive, stabilization_iterations):
+    """
+    Apply runtime options for faster large-network rendering.
+    """
+    iterations = max(50, int(stabilization_iterations))
+    options = f"""
+    {{
+      "physics": {{
+        "enabled": true,
+        "stabilization": {{
+          "enabled": true,
+          "iterations": {iterations},
+          "updateInterval": 50,
+          "fit": true
+        }}
+      }},
+      "interaction": {{
+        "hideEdgesOnDrag": true,
+        "hideEdgesOnZoom": true
+      }}
+    }}
+    """
+    network_obj.set_options(options)
+    if interactive:
+        network_obj.show_buttons(filter_=["physics"])
 
 def clear_gene_label_cache():
     """
@@ -132,7 +191,15 @@ def _collapse_edgelist_tf_gene_pairs(edgelist):
             collapsed.append([tf, edge[0], *edge[1:]])
     return collapsed
 
-def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_degs=None): # option to make not directed so it resembles a co expression net
+def pyviz_deggrn(
+    adjlist,
+    outfile="grn.html",
+    directed=True,
+    top_tfs=None,
+    top_degs=None,
+    interactive=True,
+    stabilization_iterations=300,
+): # option to make not directed so it resembles a co expression net
     """
     Visualize a Gene Regulatory Network (GRN) stored as an adjacency list.
 
@@ -227,12 +294,24 @@ def pyviz_deggrn(adjlist, outfile="grn.html", directed=True, top_tfs=None, top_d
         print("Warning: pyviz_deggrn has no edges to render.")
         return
 
-    G.toggle_physics(True)
-    G.show_buttons(filter_=["physics"])
+    _configure_network_runtime(
+        G,
+        interactive=interactive,
+        stabilization_iterations=stabilization_iterations,
+    )
     G.write_html(outfile)
+    if not interactive:
+        _inject_disable_physics_after_stabilization(outfile)
     return 
 
-def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None): # constructed using anna ritz's course assignment as inspiration
+def viz_graph(
+    edgelist,
+    outfile,
+    top_tfs=None,
+    top_degs=None,
+    interactive=True,
+    stabilization_iterations=300,
+): # constructed using anna ritz's course assignment for bio331
     """
     Visualize a directed graph from an enriched edgelist and write it to an HTML file.
 
@@ -324,9 +403,14 @@ def viz_graph(edgelist, outfile, top_tfs=None, top_degs=None): # constructed usi
     if len(G.edges) == 0:
         print("Warning: viz_graph has no edges to render.")
         return
-    G.toggle_physics(True)
-    G.show_buttons(filter_=["physics"])
+    _configure_network_runtime(
+        G,
+        interactive=interactive,
+        stabilization_iterations=stabilization_iterations,
+    )
     G.write_html(outfile)
+    if not interactive:
+        _inject_disable_physics_after_stabilization(outfile)
 
 # Degree calculations
 def get_degree(edgelist):
@@ -403,3 +487,242 @@ def make_x_y(hist):
         x_list.append(deg)
         y_list.append(hist[deg])
     return x_list, y_list
+
+
+def _coerce_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def viz_bipartite_metric_stats(
+    stat_rows,
+    outfile,
+    disorder_order=None,
+    metric_order=None,
+):
+    """
+    Visualize cross-disorder statistical comparisons for bipartite metrics.
+
+    Input rows are expected from graph_algos.disorder_bipartite_stat_rows:
+      {
+        "disorder": ...,
+        "metric": ...,
+        "p_value": ...,
+        "cliffs_delta": ...,
+        ...
+      }
+
+    Produces a two-panel heatmap:
+      - left: Cliff's delta (effect size, signed)
+      - right: -log10(p-value) with significance stars
+    """
+    if not stat_rows:
+        print("Warning: viz_bipartite_metric_stats has no rows to render.")
+        return
+
+    default_metric_order = [
+        "Strength",
+        "Clustering_Coefficient",
+        "Closeness_Centrality",
+        "Eccentricity_Centrality",
+        "Betweenness",
+    ]
+    metric_order = metric_order or default_metric_order
+
+    if disorder_order is None:
+        disorder_order = sorted(
+            {
+                str(row.get("disorder", "")).strip()
+                for row in stat_rows
+                if row.get("disorder")
+            }
+        )
+
+    disorder_order = [d for d in disorder_order if d]
+    if not disorder_order:
+        print("Warning: viz_bipartite_metric_stats found no disorders.")
+        return
+
+    metric_to_idx = {m: i for i, m in enumerate(metric_order)}
+    disorder_to_idx = {d: i for i, d in enumerate(disorder_order)}
+
+    cliffs_mat = np.full((len(metric_order), len(disorder_order)), np.nan)
+    pval_mat = np.full((len(metric_order), len(disorder_order)), np.nan)
+    sig_mat = np.zeros((len(metric_order), len(disorder_order)), dtype=bool)
+
+    for row in stat_rows:
+        metric = row.get("metric")
+        disorder = row.get("disorder")
+        if metric not in metric_to_idx or disorder not in disorder_to_idx:
+            continue
+
+        i = metric_to_idx[metric]
+        j = disorder_to_idx[disorder]
+
+        cliffs = _coerce_float(row.get("cliffs_delta"))
+        pval = _coerce_float(row.get("p_value"))
+
+        cliffs_mat[i, j] = cliffs
+        pval_mat[i, j] = pval
+        sig_mat[i, j] = np.isfinite(pval) and pval < 0.05
+
+    # transform p-values for visibility while preserving NaN cells
+    pscore_mat = np.full_like(pval_mat, np.nan, dtype=float)
+    finite_mask = np.isfinite(pval_mat) & (pval_mat > 0)
+    pscore_mat[finite_mask] = -np.log10(pval_mat[finite_mask])
+    pscore_mat[np.isfinite(pval_mat) & (pval_mat == 0)] = 16.0
+
+    fig, axs = plt.subplots(1, 2, figsize=(max(10, 1.4 * len(disorder_order) + 4), 7), layout="constrained")
+
+    im1 = axs[0].imshow(cliffs_mat, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
+    axs[0].set_title("Cliff's Delta (TF vs Gene)")
+    axs[0].set_xticks(range(len(disorder_order)))
+    axs[0].set_xticklabels(disorder_order, rotation=45, ha="right")
+    axs[0].set_yticks(range(len(metric_order)))
+    axs[0].set_yticklabels(metric_order)
+    plt.colorbar(im1, ax=axs[0], fraction=0.046, pad=0.04)
+
+    max_pscore = np.nanmax(pscore_mat) if np.any(np.isfinite(pscore_mat)) else 1.0
+    max_pscore = max(1.0, min(16.0, float(max_pscore)))
+    im2 = axs[1].imshow(pscore_mat, cmap="YlOrRd", vmin=0, vmax=max_pscore, aspect="auto")
+    axs[1].set_title("-log10(p-value)")
+    axs[1].set_xticks(range(len(disorder_order)))
+    axs[1].set_xticklabels(disorder_order, rotation=45, ha="right")
+    axs[1].set_yticks(range(len(metric_order)))
+    axs[1].set_yticklabels(metric_order)
+    plt.colorbar(im2, ax=axs[1], fraction=0.046, pad=0.04)
+
+    for i in range(len(metric_order)):
+        for j in range(len(disorder_order)):
+            if np.isfinite(cliffs_mat[i, j]):
+                axs[0].text(j, i, f"{cliffs_mat[i, j]:.2f}", ha="center", va="center", fontsize=8)
+            if np.isfinite(pscore_mat[i, j]):
+                star = "*" if sig_mat[i, j] else ""
+                axs[1].text(j, i, f"{pscore_mat[i, j]:.2f}{star}", ha="center", va="center", fontsize=8)
+
+    fig.suptitle("Cross-Disorder Bipartite Metric Comparisons")
+    fig.savefig(outfile, dpi=300)
+    plt.close(fig)
+
+
+def viz_strength_stat_summary(
+    stat_rows,
+    outfile,
+    legend_outfile=None,
+    disorder_order=None,
+):
+    """
+    Create a Strength-only cross-disorder statistical summary figure.
+
+    Input rows are expected from graph_algos.disorder_bipartite_stat_rows.
+    Uses only rows where metric == "Strength".
+    """
+    if not stat_rows:
+        print("Warning: viz_strength_stat_summary has no rows to render.")
+        return
+
+    strength_rows = [r for r in stat_rows if r.get("metric") == "Strength"]
+    if not strength_rows:
+        print("Warning: viz_strength_stat_summary found no Strength rows.")
+        return
+
+    rows_by_disorder = {r.get("disorder"): r for r in strength_rows if r.get("disorder")}
+    if disorder_order is None:
+        disorders = sorted(rows_by_disorder.keys())
+    else:
+        disorders = [d for d in disorder_order if d in rows_by_disorder]
+
+    if not disorders:
+        print("Warning: viz_strength_stat_summary found no disorders.")
+        return
+
+    cliffs = np.array([_coerce_float(rows_by_disorder[d].get("cliffs_delta")) for d in disorders], dtype=float)
+    pvals = np.array([_coerce_float(rows_by_disorder[d].get("p_value")) for d in disorders], dtype=float)
+    tf_means = np.array([_coerce_float(rows_by_disorder[d].get("tf_mean")) for d in disorders], dtype=float)
+    gene_means = np.array([_coerce_float(rows_by_disorder[d].get("gene_mean")) for d in disorders], dtype=float)
+
+    pscore = np.full_like(pvals, np.nan)
+    valid_pos = np.isfinite(pvals) & (pvals > 0)
+    pscore[valid_pos] = -np.log10(pvals[valid_pos])
+    pscore[np.isfinite(pvals) & (pvals == 0)] = 16.0
+    sig = np.isfinite(pvals) & (pvals < 0.05)
+
+    colors = []
+    for v in cliffs:
+        if not np.isfinite(v):
+            colors.append("#bdbdbd")
+        elif v >= 0:
+            colors.append("#c0392b")  # TF tends larger
+        else:
+            colors.append("#2471a3")  # Gene tends larger
+
+    out_dir = os.path.dirname(outfile)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    x = np.arange(len(disorders))
+    fig, axs = plt.subplots(
+        2,
+        1,
+        figsize=(max(10, 1.2 * len(disorders) + 2), 9),
+        layout="constrained",
+        height_ratios=[2.0, 1.4],
+    )
+
+    # Panel A: effect size (Cliff's delta)
+    axs[0].bar(x, cliffs, color=colors, edgecolor="black", linewidth=0.4)
+    axs[0].axhline(0, color="black", linewidth=1)
+    axs[0].set_ylim(-1.05, 1.05)
+    axs[0].set_ylabel("Cliff's delta")
+    axs[0].set_title("Panel A: Effect Size for Strength (TF vs Gene)")
+    axs[0].set_xticks(x)
+    axs[0].set_xticklabels(disorders, rotation=45, ha="right")
+    for i, v in enumerate(cliffs):
+        if np.isfinite(v):
+            axs[0].text(i, v + (0.04 if v >= 0 else -0.06), f"{v:.2f}", ha="center", va="bottom" if v >= 0 else "top", fontsize=8)
+
+    # Panel B: significance and group means
+    max_pscore = np.nanmax(pscore) if np.any(np.isfinite(pscore)) else 1.0
+    max_pscore = max(1.0, min(16.0, float(max_pscore)))
+    axs[1].bar(x, pscore, color="#f4d03f", edgecolor="black", linewidth=0.4)
+    axs[1].axhline(-np.log10(0.05), color="#7d3c98", linestyle="--", linewidth=1, label="p = 0.05")
+    axs[1].set_ylim(0, max_pscore * 1.15)
+    axs[1].set_ylabel("-log10(p-value)")
+    axs[1].set_title("Panel B: Mann-Whitney U Significance for Strength")
+    axs[1].set_xticks(x)
+    axs[1].set_xticklabels(disorders, rotation=45, ha="right")
+    for i, v in enumerate(pscore):
+        if np.isfinite(v):
+            star = "*" if sig[i] else ""
+            axs[1].text(i, v + 0.03 * max(1.0, max_pscore), f"{v:.2f}{star}", ha="center", va="bottom", fontsize=8)
+    axs[1].legend(loc="upper left")
+
+    fig.suptitle("Cross-Disorder Strength Distribution Comparison")
+    fig.savefig(outfile, dpi=300)
+    plt.close(fig)
+
+    legend_text = (
+        "Figure legend: Cross-disorder statistical comparison of bipartite network Strength.\n"
+        "Input: For each disorder, the DEG-filtered TF->gene GRN is converted to a directed bipartite graph. "
+        "Node Strength is computed as weighted in-degree + weighted out-degree using absolute edge weights.\n"
+        "Methods: TF-node and gene-node Strength distributions are compared within each disorder using a two-sided "
+        "Mann-Whitney U test (non-parametric). Effect size is quantified by Cliff's delta, where positive values "
+        "indicate TF strengths tend to exceed gene strengths, and negative values indicate the opposite.\n"
+        "Panel A: Cliff's delta per disorder (magnitude and direction of effect).\n"
+        "Panel B: -log10(p-value) from Mann-Whitney U; dashed line denotes p = 0.05; '*' marks p < 0.05.\n"
+        "Additional context: Mean TF Strength and mean Gene Strength are also available in the stats table "
+        "(columns tf_mean, gene_mean) used to construct this figure."
+    )
+
+    if legend_outfile:
+        legend_dir = os.path.dirname(legend_outfile)
+        if legend_dir:
+            os.makedirs(legend_dir, exist_ok=True)
+        with open(legend_outfile, "w") as f:
+            f.write(legend_text + "\n")
+
+    print(f"wrote strength stats figure: {outfile}")
+    if legend_outfile:
+        print(f"wrote strength stats legend: {legend_outfile}")

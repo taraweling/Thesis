@@ -43,12 +43,6 @@
              
 
              
-             #config {
-                 float: left;
-                 width: 400px;
-                 height: 600px;
-             }
-             
 
              
         </style>
@@ -63,8 +57,6 @@
         </div>
 
         
-        
-            <div id="config"></div>
         
 
         <script type="text/javascript">
@@ -96,8 +88,8 @@
                   
 
                   // parsing and collecting nodes and edges from the python
-                  nodes = new vis.DataSet([{"color": "#cccccc", "id": "ENSG00000077150", "label": "ENSG00000077150", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000163132", "label": "ENSG00000163132", "shape": "circle", "size": 37.665003493812804}, {"color": "#cccccc", "id": "ENSG00000103241", "label": "ENSG00000103241", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000018280", "label": "ENSG00000018280", "shape": "circle", "size": 37.19879427787534}, {"color": "#4575b4", "id": "ENSG00000090339", "label": "ENSG00000090339", "shape": "circle", "size": 42.01779444766211}, {"color": "#cccccc", "id": "ENSG00000135111", "label": "ENSG00000135111", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000147256", "label": "ENSG00000147256", "shape": "circle", "size": 38.61730647173036}, {"color": "#cccccc", "id": "ENSG00000153234", "label": "ENSG00000153234", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000177464", "label": "ENSG00000177464", "shape": "circle", "size": 32.251120886579805}, {"color": "#cccccc", "id": "ENSG00000168874", "label": "ENSG00000168874", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000180660", "label": "ENSG00000180660", "shape": "circle", "size": 40.542663824552946}, {"color": "#cccccc", "id": "ENSG00000172216", "label": "ENSG00000172216", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000176014", "label": "ENSG00000176014", "shape": "circle", "size": 60}, {"color": "#4575b4", "id": "ENSG00000185022", "label": "ENSG00000185022", "shape": "circle", "size": 32.86929786288049}, {"color": "#cccccc", "id": "ENSG00000185507", "label": "ENSG00000185507", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "ENSG00000203883", "label": "ENSG00000203883", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000006327", "label": "ENSG00000006327", "shape": "circle", "size": 49.33573122449154}, {"color": "#4575b4", "id": "ENSG00000244734", "label": "ENSG00000244734", "shape": "circle", "size": 35.26251572701345}, {"color": "#cccccc", "id": "ENSG00000221869", "label": "ENSG00000221869", "shape": "triangle", "size": 20}]);
-                  edges = new vis.DataSet([{"arrows": "to", "from": "ENSG00000077150", "to": "ENSG00000163132", "value": 3.8563}, {"arrows": "to", "from": "ENSG00000103241", "to": "ENSG00000018280", "value": 2.2184999999999997}, {"arrows": "to", "from": "ENSG00000103241", "to": "ENSG00000090339", "value": 7.15005}, {"arrows": "to", "from": "ENSG00000135111", "to": "ENSG00000147256", "value": 4.6154}, {"arrows": "to", "from": "ENSG00000153234", "to": "ENSG00000090339", "value": 6.22085}, {"arrows": "to", "from": "ENSG00000153234", "to": "ENSG00000177464", "value": 5.938}, {"arrows": "to", "from": "ENSG00000168874", "to": "ENSG00000147256", "value": 1.076315}, {"arrows": "to", "from": "ENSG00000168874", "to": "ENSG00000180660", "value": 3.174}, {"arrows": "to", "from": "ENSG00000172216", "to": "ENSG00000018280", "value": 1.0429}, {"arrows": "to", "from": "ENSG00000172216", "to": "ENSG00000163132", "value": 6.37855}, {"arrows": "to", "from": "ENSG00000172216", "to": "ENSG00000176014", "value": 5.26865}, {"arrows": "to", "from": "ENSG00000172216", "to": "ENSG00000177464", "value": 5.7239}, {"arrows": "to", "from": "ENSG00000172216", "to": "ENSG00000180660", "value": 4.86205}, {"arrows": "to", "from": "ENSG00000172216", "to": "ENSG00000185022", "value": 1.1583}, {"arrows": "to", "from": "ENSG00000185022", "to": "ENSG00000163132", "value": 6.991300000000001}, {"arrows": "to", "from": "ENSG00000185507", "to": "ENSG00000163132", "value": 3.4082999999999997}, {"arrows": "to", "from": "ENSG00000203883", "to": "ENSG00000006327", "value": 3.5975}, {"arrows": "to", "from": "ENSG00000203883", "to": "ENSG00000180660", "value": 1.17585}, {"arrows": "to", "from": "ENSG00000203883", "to": "ENSG00000244734", "value": 4.8993}, {"arrows": "to", "from": "ENSG00000221869", "to": "ENSG00000185022", "value": 3.80545}, {"arrows": "to", "from": "ENSG00000221869", "to": "ENSG00000244734", "value": 4.378}]);
+                  nodes = new vis.DataSet([{"color": "#cccccc", "id": "ARNTL", "label": "ARNTL", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000090339", "label": "ICAM1", "shape": "circle", "size": 42.01779444766211}, {"color": "#cccccc", "id": "ASCL1", "label": "ASCL1", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000110852", "label": "CLEC2B", "shape": "circle", "size": 35.09460778264131}, {"color": "#cccccc", "id": "BARX2", "label": "BARX2", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000147256", "label": "ARHGAP36", "shape": "circle", "size": 38.61730647173036}, {"color": "#4575b4", "id": "ENSG00000163132", "label": "MSX1", "shape": "circle", "size": 37.665003493812804}, {"color": "#4575b4", "id": "ENSG00000185885", "label": "IFITM1", "shape": "circle", "size": 36.97725590165692}, {"color": "#4575b4", "id": "ENSG00000206172", "label": "HBA1", "shape": "circle", "size": 36.96096980557077}, {"color": "#cccccc", "id": "BCL11A", "label": "BCL11A", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000078401", "label": "EDN1", "shape": "circle", "size": 34.057966871274395}, {"color": "#4575b4", "id": "ENSG00000244734", "label": "HBB", "shape": "circle", "size": 35.26251572701345}, {"color": "#cccccc", "id": "BHLHA15", "label": "BHLHA15", "shape": "triangle", "size": 20}, {"color": "#d73027", "id": "ENSG00000180660", "label": "MAB21L1", "shape": "circle", "size": 40.542663824552946}, {"color": "#cccccc", "id": "DPRX", "label": "DPRX", "shape": "triangle", "size": 20}, {"color": "#4575b4", "id": "ENSG00000185022", "label": "MAFF", "shape": "circle", "size": 32.86929786288049}, {"color": "#cccccc", "id": "E2F7", "label": "E2F7", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "FOXM1", "label": "FOXM1", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "FOXO6", "label": "FOXO6", "shape": "triangle", "size": 20}, {"color": "#cccccc", "id": "FOXP1", "label": "FOXP1", "shape": "triangle", "size": 20}]);
+                  edges = new vis.DataSet([{"arrows": "to", "from": "ARNTL", "to": "ENSG00000090339", "value": 3.73635}, {"arrows": "to", "from": "ASCL1", "to": "ENSG00000090339", "value": 2.19025}, {"arrows": "to", "from": "ASCL1", "to": "ENSG00000110852", "value": 3.5594}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000147256", "value": 3.35945}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000163132", "value": 3.9492000000000003}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000185885", "value": 3.8224}, {"arrows": "to", "from": "BARX2", "to": "ENSG00000206172", "value": 2.9587}, {"arrows": "to", "from": "BCL11A", "to": "ENSG00000078401", "value": 3.52245}, {"arrows": "to", "from": "BCL11A", "to": "ENSG00000244734", "value": 4.155}, {"arrows": "to", "from": "BHLHA15", "to": "ENSG00000078401", "value": 4.16665}, {"arrows": "to", "from": "BHLHA15", "to": "ENSG00000090339", "value": 3.1791}, {"arrows": "to", "from": "BHLHA15", "to": "ENSG00000180660", "value": 3.2179}, {"arrows": "to", "from": "DPRX", "to": "ENSG00000185022", "value": 3.8852}, {"arrows": "to", "from": "E2F7", "to": "ENSG00000078401", "value": 2.1856999999999998}, {"arrows": "to", "from": "E2F7", "to": "ENSG00000163132", "value": 3.4768499999999998}, {"arrows": "to", "from": "FOXM1", "to": "ENSG00000163132", "value": 3.90805}, {"arrows": "to", "from": "FOXM1", "to": "ENSG00000180660", "value": 4.4742999999999995}, {"arrows": "to", "from": "FOXO6", "to": "ENSG00000090339", "value": 4.18365}, {"arrows": "to", "from": "FOXO6", "to": "ENSG00000185022", "value": 1.9787}, {"arrows": "to", "from": "FOXP1", "to": "ENSG00000110852", "value": 3.65745}, {"arrows": "to", "from": "FOXP1", "to": "ENSG00000244734", "value": 2.9737}]);
 
                   nodeColors = {};
                   allNodes = nodes.get({ returnType: "Object" });
@@ -108,46 +100,11 @@
                   // adding nodes and edges to the graph
                   data = {nodes: nodes, edges: edges};
 
-                  var options = {
-    "configure": {
-        "enabled": true,
-        "filter": [
-            "physics"
-        ]
-    },
-    "edges": {
-        "color": {
-            "inherit": true
-        },
-        "smooth": {
-            "enabled": true,
-            "type": "dynamic"
-        }
-    },
-    "interaction": {
-        "dragNodes": true,
-        "hideEdgesOnDrag": false,
-        "hideNodesOnDrag": false
-    },
-    "physics": {
-        "enabled": true,
-        "stabilization": {
-            "enabled": true,
-            "fit": true,
-            "iterations": 1000,
-            "onlyDynamicEdges": false,
-            "updateInterval": 50
-        }
-    }
-};
+                  var options = {"physics": {"enabled": true, "stabilization": {"enabled": true, "iterations": 200, "updateInterval": 50, "fit": true}}, "interaction": {"hideEdgesOnDrag": true, "hideEdgesOnZoom": true}};
 
                   
 
 
-                  
-                  // if this network requires displaying the configure window,
-                  // put it in its div
-                  options.configure["container"] = document.getElementById("config");
                   
 
                   network = new vis.Network(container, data, options);
