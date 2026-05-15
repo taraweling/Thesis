@@ -44,6 +44,23 @@ def _inject_disable_physics_after_stabilization(html_path):
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(new_content)
 
+def _write_empty_graph_html(outfile, message):
+    """
+    Overwrite outfile with a minimal HTML placeholder when no edges exist.
+    This prevents stale prior visualizations from being mistaken for fresh output.
+    """
+    out_dir = os.path.dirname(outfile)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<title>Empty Graph</title></head><body>"
+        f"<p>{message}</p>"
+        "</body></html>"
+    )
+    with open(outfile, "w", encoding="utf-8") as f:
+        f.write(html)
+
 
 def _configure_network_runtime(network_obj, interactive, stabilization_iterations):
     """
@@ -369,6 +386,7 @@ def pyviz_deggrn(
     # Write output
     if len(G.edges) == 0:
         print("Warning: pyviz_deggrn has no edges to render.")
+        _write_empty_graph_html(outfile, "No edges to render for this graph.")
         return
 
     _configure_network_runtime(
@@ -475,6 +493,7 @@ def viz_graph(
     # Output
     if len(G.edges) == 0:
         print("Warning: viz_graph has no edges to render.")
+        _write_empty_graph_html(outfile, "No edges to render for this graph.")
         return
     _configure_network_runtime(
         G,
