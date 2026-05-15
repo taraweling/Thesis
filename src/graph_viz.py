@@ -8,6 +8,12 @@ import graph_utils as gu
 
 # Shared process-level cache for ENSG -> display label lookups.
 _GENE_LABEL_CACHE = {}
+_GRN_POS_EDGE_COLOR = "#2e7d32"  # positive GRN weight
+_GRN_NEG_EDGE_COLOR = "#7d3c98"  # negative GRN weight
+_GRN_ZERO_EDGE_COLOR = "#656565"  # zero/unknown GRN weight
+_LFC_POS_NODE_COLOR = "#4575b4"  # positive log2fc
+_LFC_NEG_NODE_COLOR = "#d73027"  # negative log2fc
+_LFC_NEUTRAL_NODE_COLOR = "#afaeae"
 
 
 def _inject_disable_physics_after_stabilization(html_path):
@@ -44,8 +50,17 @@ def _configure_network_runtime(network_obj, interactive, stabilization_iteration
     Apply runtime options for faster large-network rendering.
     """
     iterations = max(50, int(stabilization_iterations))
+    configure_block = ""
+    if interactive:
+        configure_block = (
+            '      "configure": {\n'
+            '        "enabled": true,\n'
+            '        "filter": ["physics"]\n'
+            '      },\n'
+        )
     options = f"""
     {{
+{configure_block}
       "physics": {{
         "enabled": true,
         "stabilization": {{
@@ -62,8 +77,6 @@ def _configure_network_runtime(network_obj, interactive, stabilization_iteration
     }}
     """
     network_obj.set_options(options)
-    if interactive:
-        network_obj.show_buttons(filter_=["physics"])
 
 def clear_gene_label_cache():
     """
@@ -87,6 +100,72 @@ def _gene_display_label(gene_id):
 
     _GENE_LABEL_CACHE[gene_id] = label
     return label
+
+def _grn_edge_style(raw_weight, fallback_width=1.0):
+    """
+    Build edge width + color from GRN edge weight sign.
+    Positive GRN weights are green, negative GRN weights are purple.
+    """
+    try:
+        grn_weight = float(raw_weight)
+    except (TypeError, ValueError):
+        return fallback_width, _GRN_ZERO_EDGE_COLOR
+
+    if grn_weight > 0:
+        color = _GRN_POS_EDGE_COLOR
+    elif grn_weight < 0:
+        color = _GRN_NEG_EDGE_COLOR
+    else:
+        color = _GRN_ZERO_EDGE_COLOR
+
+    return abs(grn_weight), color
+
+def _lfc_node_color(log2fc_value):
+    """
+    Build node color from log2fc sign.
+    Positive log2fc is blue, negative log2fc is red.
+    """
+    try:
+        val = float(log2fc_value)
+    except (TypeError, ValueError):
+        return _LFC_NEUTRAL_NODE_COLOR
+
+    if val > 0:
+        return _LFC_POS_NODE_COLOR
+    if val < 0:
+        return _LFC_NEG_NODE_COLOR
+    return _LFC_NEUTRAL_NODE_COLOR
+
+def _merge_gene_node_metadata(node_entry, log2fc=None, pval=None):
+    """
+    Merge gene-level DEG metadata onto an existing node entry.
+    Prefer the observation with the smallest p-value when available.
+    """
+    if not isinstance(node_entry, dict):
+        return
+
+    cur_pval = node_entry.get("pval")
+    cur_log2fc = node_entry.get("log2fc")
+
+    # Fill blanks first.
+    if cur_log2fc is None and log2fc is not None:
+        node_entry["log2fc"] = log2fc
+    if cur_pval is None and pval is not None:
+        node_entry["pval"] = pval
+        if log2fc is not None:
+            node_entry["log2fc"] = log2fc
+        return
+
+    # If both p-values are present, keep the stronger evidence (smaller p-value)
+    # and carry its paired log2fc so color/size reflect the same observation.
+    if cur_pval is not None and pval is not None:
+        try:
+            if float(pval) < float(cur_pval):
+                node_entry["pval"] = pval
+                if log2fc is not None:
+                    node_entry["log2fc"] = log2fc
+        except (TypeError, ValueError):
+            pass
 
 # All functions now assume edgelist rows look like:
 # [TF, Gene, weight] OR
@@ -217,10 +296,11 @@ def pyviz_deggrn(
 
     Visual encodings 
           Edge width   > |weight|
+          Edge color   > GRN weight sign (green positive / purple negative)
           TF nodes     > triangle
           Gene nodes   > circle
           Node size    >  log10(pval)
-          Node color   > log2fc (red up / blue down)
+          Node color   > log2fc (blue positive / red negative)
     Filtering:
           top_tfs  > keep TFs with most unique targets
           top_degs > keep genes with largest |log2fc|, then lowest pval
@@ -246,11 +326,12 @@ def pyviz_deggrn(
             log2fc = edge[6] if len(edge) > 6 else None
             pval = edge[7] if len(edge) > 7 else None
 
-            node_info.setdefault(gene, {
+            gene_entry = node_info.setdefault(gene, {
                 "type": "Gene",
-                "log2fc": log2fc,
-                "pval": pval
+                "log2fc": None,
+                "pval": None,
             })
+            _merge_gene_node_metadata(gene_entry, log2fc=log2fc, pval=pval)
 
     # Add nodes    
 
@@ -266,12 +347,7 @@ def pyviz_deggrn(
             size = max(8, min(60, size))
 
         # color from log2fc
-        color = "#cccccc"
-        if info.get("log2fc") is not None:
-            if info["log2fc"] > 0:
-                color = "#d73027"
-            elif info["log2fc"] < 0:
-                color = "#4575b4"
+        color = _lfc_node_color(info.get("log2fc"))
 
         G.add_node(
             node,
@@ -286,8 +362,9 @@ def pyviz_deggrn(
     for tf, targets in adjlist.items():
         for edge in targets:
             gene = edge[0]
-            weight = abs(edge[1]) if len(edge) > 1 else 1.0
-            G.add_edge(tf, gene, value=weight)
+            raw_weight = edge[1] if len(edge) > 1 else 1.0
+            weight, edge_color = _grn_edge_style(raw_weight, fallback_width=1.0)
+            G.add_edge(tf, gene, value=weight, color=edge_color)
 
     # Write output
     if len(G.edges) == 0:
@@ -300,8 +377,6 @@ def pyviz_deggrn(
         stabilization_iterations=stabilization_iterations,
     )
     G.write_html(outfile)
-    if not interactive:
-        _inject_disable_physics_after_stabilization(outfile)
     return 
 
 def viz_graph(
@@ -320,10 +395,11 @@ def viz_graph(
 
     Visualization (if present):
           Edge width   > |weight|
+          Edge color   > GRN weight sign (green positive / purple negative)
           TF nodes     > triangle
           Gene nodes   > circle
           Node size    >  log10(pval)
-          Node color   > log2fc (red up / blue down)
+          Node color   > log2fc (blue positive / red negative)
     Filtering:
           top_tfs  > keep TFs with most targets
           top_degs > keep genes with largest |log2fc|, then lowest pval
@@ -356,10 +432,12 @@ def viz_graph(
         node_info.setdefault(tf, {"type": "TF"})
 
         # Gene node
-        node_info.setdefault(gene, {
+        gene_entry = node_info.setdefault(gene, {
             "type": "Gene",
-            "log2fc": log2fc,
-            "pval": pval})
+            "log2fc": None,
+            "pval": None,
+        })
+        _merge_gene_node_metadata(gene_entry, log2fc=log2fc, pval=pval)
 
     # Add nodes with styling
 
@@ -376,12 +454,7 @@ def viz_graph(
             size = max(8, min(60, size))
 
         # color from log2fc
-        color = "#cccccc"
-        if info.get("log2fc") is not None:
-            if info["log2fc"] > 0:
-                color = "#d73027"   # upregulated
-            elif info["log2fc"] < 0:
-                color = "#4575b4"   # downregulated
+        color = _lfc_node_color(info.get("log2fc"))
 
         G.add_node(
             n,
@@ -395,9 +468,9 @@ def viz_graph(
     for row in edgelist:
         tf = row[0]
         gene = row[1]
-        weight = abs(row[2]) if len(row) > 2 else 1.0
-
-        G.add_edge(tf, gene, value=weight)
+        raw_weight = row[2] if len(row) > 2 else 1.0
+        weight, edge_color = _grn_edge_style(raw_weight, fallback_width=1.0)
+        G.add_edge(tf, gene, value=weight, color=edge_color)
 
     # Output
     if len(G.edges) == 0:
@@ -409,8 +482,6 @@ def viz_graph(
         stabilization_iterations=stabilization_iterations,
     )
     G.write_html(outfile)
-    if not interactive:
-        _inject_disable_physics_after_stabilization(outfile)
 
 # Degree calculations
 def get_degree(edgelist):

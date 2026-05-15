@@ -1,0 +1,6 @@
+Figure legend: Cross-disorder statistical comparison of bipartite network Strength.
+Input: For each disorder, the DEG-filtered TF->gene GRN is converted to a directed bipartite graph. Node Strength is computed as weighted in-degree + weighted out-degree using absolute edge weights.
+Methods: TF-node and gene-node Strength distributions are compared within each disorder using a two-sided Mann-Whitney U test (non-parametric). Effect size is quantified by Cliff's delta, where positive values indicate TF strengths tend to exceed gene strengths, and negative values indicate the opposite.
+Panel A: Cliff's delta per disorder (magnitude and direction of effect).
+Panel B: -log10(p-value) from Mann-Whitney U; dashed line denotes p = 0.05; '*' marks p < 0.05.
+Additional context: Mean TF Strength and mean Gene Strength are also available in the stats table (columns tf_mean, gene_mean) used to construct this figure.

@@ -15,6 +15,11 @@ try:
 except Exception:
     mannwhitneyu = None
 
+# Safety caps to avoid very long centrality computations on huge graphs.
+_BIPARTITE_METRIC_MAX_NODES = 12000
+_BIPARTITE_METRIC_MAX_EDGES = 250000
+_BIPARTITE_METRIC_SKIP_WARNED = False
+
 # Helpers
 
 def _extract_deg_genes(degset):
@@ -994,6 +999,7 @@ def _clean_numeric(values):
         return arr
     return arr[np.isfinite(arr)]
 
+# below functions taken from bio331 final group project
 def weighted_node_degree(weighted_adjlist, node, mode="total"):
     """
     Weighted degree for directed bipartite GRNs.
@@ -1194,15 +1200,18 @@ def bipartite_metric_distributions(weighted_adjlist):
     Return run1-style metric distributions adapted for a directed,
     weighted bipartite GRN.
     """
+    global _BIPARTITE_METRIC_SKIP_WARNED
+
     G, tf_nodes, gene_nodes = grn_to_bipartite_digraph(weighted_adjlist)
+    empty = {
+        "Strength": {"TF": [], "Gene": []},
+        "Clustering_Coefficient": {"TF": [], "Gene": []},
+        "Closeness_Centrality": {"TF": [], "Gene": []},
+        "Eccentricity_Centrality": {"TF": [], "Gene": []},
+        "Betweenness": {"TF": [], "Gene": []},
+    }
     if G.number_of_nodes() == 0:
-        return {
-            "Strength": {"TF": [], "Gene": []},
-            "Clustering_Coefficient": {"TF": [], "Gene": []},
-            "Closeness_Centrality": {"TF": [], "Gene": []},
-            "Eccentricity_Centrality": {"TF": [], "Gene": []},
-            "Betweenness": {"TF": [], "Gene": []},
-        }
+        return empty
 
     strength_map = {}
     for node in G.nodes:
@@ -1210,13 +1219,30 @@ def bipartite_metric_distributions(weighted_adjlist):
             G.in_degree(node, weight="abs_weight")
             + G.out_degree(node, weight="abs_weight")
         )
+    tf_strength, gene_strength = _metric_partition(strength_map, tf_nodes, gene_nodes)
+
+    # Expensive centralities (especially betweenness) are skipped for very
+    # large graphs to avoid apparent hangs during full pipeline runs.
+    if (
+        G.number_of_nodes() > _BIPARTITE_METRIC_MAX_NODES
+        or G.number_of_edges() > _BIPARTITE_METRIC_MAX_EDGES
+    ):
+        if not _BIPARTITE_METRIC_SKIP_WARNED:
+            print(
+                "warning: bipartite graph too large for full centrality metrics "
+                f"(nodes={G.number_of_nodes()}, edges={G.number_of_edges()}); "
+                "computing Strength only for this run"
+            )
+            _BIPARTITE_METRIC_SKIP_WARNED = True
+        out = dict(empty)
+        out["Strength"] = {"TF": tf_strength, "Gene": gene_strength}
+        return out
 
     clust_map = calculate_bipartite_clustering_coeff(weighted_adjlist)
     close_map = closeness_centralities(weighted_adjlist, mode="out")
     ecc_map = eccentricity_centralities(weighted_adjlist, mode="out")
     betw_map = betweenness_centralities(weighted_adjlist, normalized=True)
 
-    tf_strength, gene_strength = _metric_partition(strength_map, tf_nodes, gene_nodes)
     tf_clust, gene_clust = _metric_partition(clust_map, tf_nodes, gene_nodes)
     tf_close, gene_close = _metric_partition(close_map, tf_nodes, gene_nodes)
     tf_ecc, gene_ecc = _metric_partition(ecc_map, tf_nodes, gene_nodes)
@@ -1230,14 +1256,53 @@ def bipartite_metric_distributions(weighted_adjlist):
         "Betweenness": {"TF": tf_betw, "Gene": gene_betw},
     }
 
-def _plot_metric_panels(metric_data, disorder_name, boxplot_file, violinplot_file):
-    order = [
+def _panel_metric_order():
+    return [
         "Strength",
         "Clustering_Coefficient",
         "Closeness_Centrality",
         "Eccentricity_Centrality",
         "Betweenness",
     ]
+
+
+def metric_panel_y_limits(metric_data_list, pad_ratio=0.05):
+    """
+    Build shared y-axis limits per metric across multiple disorders.
+
+    Parameters
+    ----------
+    metric_data_list : iterable of metric_data dicts
+        Each item should match bipartite_metric_distributions(...) output.
+    pad_ratio : float
+        Relative padding added above/below observed min/max.
+    """
+    limits = {}
+    for metric in _panel_metric_order():
+        vals = []
+        for metric_data in metric_data_list:
+            if not metric_data or metric not in metric_data:
+                continue
+            vals.extend(metric_data[metric].get("TF", []))
+            vals.extend(metric_data[metric].get("Gene", []))
+        arr = _clean_numeric(vals)
+        if arr.size == 0:
+            limits[metric] = (0.0, 1.0)
+            continue
+        lo = float(np.min(arr))
+        hi = float(np.max(arr))
+        if lo == hi:
+            pad = max(abs(lo), 1.0) * max(0.01, pad_ratio)
+            limits[metric] = (lo - pad, hi + pad)
+        else:
+            span = hi - lo
+            pad = span * max(0.01, pad_ratio)
+            limits[metric] = (lo - pad, hi + pad)
+    return limits
+
+
+def _plot_metric_panels(metric_data, disorder_name, boxplot_file, violinplot_file, y_limits=None):
+    order = _panel_metric_order()
     labels = {
         "Strength": "Strength",
         "Clustering_Coefficient": "Clust. Coeff.",
@@ -1269,6 +1334,8 @@ def _plot_metric_panels(metric_data, disorder_name, boxplot_file, violinplot_fil
             axs[i].text(0.5, 0.5, "No data", ha="center", va="center", transform=axs[i].transAxes)
             axs[i].set_xticks([1, 2], ["TF", "Gene"])
         axs[i].set_title(labels[metric])
+        if y_limits and metric in y_limits:
+            axs[i].set_ylim(*y_limits[metric])
     fig1.suptitle(f"{disorder_name}: Boxplots of Bipartite Network Measures")
     fig1.savefig(boxplot_file)
     plt.close(fig1)
@@ -1284,22 +1351,31 @@ def _plot_metric_panels(metric_data, disorder_name, boxplot_file, violinplot_fil
             axs[i].text(0.5, 0.5, "No data", ha="center", va="center", transform=axs[i].transAxes)
         axs[i].set_title(labels[metric])
         axs[i].set_xticks([1, 2], ["TF", "Gene"])
+        if y_limits and metric in y_limits:
+            axs[i].set_ylim(*y_limits[metric])
     fig2.suptitle(f"{disorder_name}: Violin Plots of Bipartite Network Measures")
     fig2.savefig(violinplot_file)
     plt.close(fig2)
 
-def disorder_bipartite_report(adjlist, disorder_name, outdir="results"):
+def disorder_bipartite_report(adjlist, disorder_name, outdir="results", y_limits=None, metric_data=None):
     """
     Compute run1-style statistics/visualizations for one disorder GRN.
     Returns a structured report with metric distributions, statistical tests,
     and output file paths.
     """
-    metric_data = bipartite_metric_distributions(adjlist)
+    if metric_data is None:
+        metric_data = bipartite_metric_distributions(adjlist)
     os.makedirs(outdir, exist_ok=True)
 
     boxplot_file = os.path.join(outdir, f"{disorder_name.lower()}_bipartite_boxplots.png")
     violinplot_file = os.path.join(outdir, f"{disorder_name.lower()}_bipartite_violinplots.png")
-    _plot_metric_panels(metric_data, disorder_name, boxplot_file, violinplot_file)
+    _plot_metric_panels(
+        metric_data,
+        disorder_name,
+        boxplot_file,
+        violinplot_file,
+        y_limits=y_limits,
+    )
 
     stat_results = {}
     distribution_files = {}

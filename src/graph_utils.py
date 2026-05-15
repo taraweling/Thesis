@@ -796,7 +796,7 @@ def make_adjlist(filename:str, threshold:float):
     """
     Inputs:
       - filename: path to a CSV matrix where first row is target genes
-      - threshold: minimum weight to keep an edge
+      - threshold: minimum absolute weight to keep an edge
     Output:
       - adjacency list {TF: [(Gene, Weight), ...]}
     """
@@ -818,7 +818,7 @@ def make_adjlist(filename:str, threshold:float):
                 except (ValueError, TypeError):
                     continue # skip missing or invalid values
                 
-                if weight > threshold:
+                if abs(weight) > abs(threshold):
                     adj.setdefault(tf, [])
                     adj[tf].append((gene, weight))
                     
@@ -857,13 +857,19 @@ def disorder_list(filename:str, *disorder:str): # generates the concatenated lis
 
     return records
 
-def de_grn_tfsonly(grn, disorderlist, tf_degset=None): # aka enrich GRN with DEG info
+def de_grn_tfsonly(grn, disorderlist, tf_degset=None, strict_tf_filter=False): # aka enrich GRN with DEG info
     """
     Merge GRN adjacency list with disorder metadata, producing:
     {TF: [(Gene, GRN_weight, disorder, study, year, tissue, log2fc, pval), ...]}
 
     This version keeps only TFs that are themselves DEGs and only targets
     that are also DEGs. TF keys can still contain repeated tuples.
+
+    Parameters:
+      - strict_tf_filter:
+          False (default): if there is no TF-ID overlap between GRN keys and
+          tf_degset, fall back to keeping all TFs with DEG targets.
+          True: require TF overlap strictly; if overlap is zero, returns no TFs.
 
     Biological rationale:
     - TF networks are central to maintaining transcriptional states, and only
@@ -893,11 +899,18 @@ def de_grn_tfsonly(grn, disorderlist, tf_degset=None): # aka enrich GRN with DEG
     apply_tf_filter = bool(tf_keyset & tf_degset)
 
     if not apply_tf_filter:
-        _warn_once(
-            "de_grn_tfsonly_no_tf_overlap",
-            "warning: no overlap between GRN TF IDs and DEG TF candidate IDs; "
-            "skipping TF-DEG filter and keeping all TFs with DEG targets",
-        )
+        if strict_tf_filter:
+            _warn_once(
+                "de_grn_tfsonly_no_tf_overlap_strict",
+                "warning: no overlap between GRN TF IDs and DEG TF candidate IDs; "
+                "strict TF-DEG filter requested, so de_grn_tfsonly will be empty",
+            )
+        else:
+            _warn_once(
+                "de_grn_tfsonly_no_tf_overlap",
+                "warning: no overlap between GRN TF IDs and DEG TF candidate IDs; "
+                "skipping TF-DEG filter and keeping all TFs with DEG targets",
+            )
 
     finalgrn = {}
 
@@ -908,7 +921,7 @@ def de_grn_tfsonly(grn, disorderlist, tf_degset=None): # aka enrich GRN with DEG
         a subset of TFs drive the strongest transcriptomic changes.
         (cite: nishiyama_systematic_2013)
         """
-        if apply_tf_filter and tf not in tf_degset:
+        if (apply_tf_filter or strict_tf_filter) and tf not in tf_degset:
             continue
 
         merged = []
@@ -930,6 +943,56 @@ def de_grn_tfsonly(grn, disorderlist, tf_degset=None): # aka enrich GRN with DEG
             finalgrn[tf] = merged
 
     return finalgrn
+
+
+def de_grn_detfgrn(grn, disorderlist, tf_degset=None, strict_tf_filter=False):
+    """
+    Build DETF_GRN edges where:
+      - TF is a DEG TF
+      - target gene is NOT a DEG
+
+    Output format:
+      {TF: [(Gene, GRN_weight), ...]}
+
+    Notes:
+      - Unlike de_grn_tfsonly (DETF-DEG), non-DEG targets do not carry
+        disorder metadata (log2fc/pval are unavailable by definition here).
+      - If strict_tf_filter=True and TF overlap is zero, returns empty.
+    """
+    deg_targets = {rec[0] for rec in disorderlist if rec}
+    tf_degset = set(tf_degset) if tf_degset is not None else set(deg_targets)
+    tf_keyset = set(grn.keys())
+    apply_tf_filter = bool(tf_keyset & tf_degset)
+
+    if not apply_tf_filter:
+        if strict_tf_filter:
+            _warn_once(
+                "de_grn_detfgrn_no_tf_overlap_strict",
+                "warning: no overlap between GRN TF IDs and DEG TF candidate IDs; "
+                "strict DETF filter requested, so detfgrn will be empty",
+            )
+        else:
+            _warn_once(
+                "de_grn_detfgrn_no_tf_overlap",
+                "warning: no overlap between GRN TF IDs and DEG TF candidate IDs; "
+                "skipping TF-DEG filter and keeping TFs with non-DEG targets",
+            )
+
+    out = {}
+    for tf, targets in grn.items():
+        if (apply_tf_filter or strict_tf_filter) and tf not in tf_degset:
+            continue
+
+        kept = []
+        for gene, weight in targets:
+            if gene in deg_targets:
+                continue
+            kept.append((gene, weight))
+
+        if kept:
+            out[tf] = kept
+
+    return out
 
 def de_grn_both(grn, disorderlist):
     

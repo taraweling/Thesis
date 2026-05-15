@@ -4,14 +4,15 @@ import graph_algos as ga
 import requests
 import os
 import re
+import csv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 RUN_TESTS = False
-TOP_DEGS = 20
+TOP_DEGS = 10
 TOP_TFS = 10
-VIZ_INTERACTIVE = False
-VIZ_STABILIZATION_ITERATIONS = 200
+VIZ_INTERACTIVE = True
+VIZ_STABILIZATION_ITERATIONS = 300 # controls how long PyVis physics runs during the initial layout stabilization of each graph.
 GRN_ZSCORE_THRESHOLD = 1.96
 GRAND_TARGETING_MODE = os.getenv("GRAND_TARGETING_MODE", "local").strip().lower()
 CLUE_SIGNATURE_MODE = os.getenv("CLUE_SIGNATURE_MODE", "gene").strip().lower()
@@ -27,6 +28,14 @@ try:
     CLUE_TOP_N = max(1, int(os.getenv("CLUE_TOP_N", "100")))
 except ValueError:
     CLUE_TOP_N = 100
+TOPOLOGY_TOP_N = 10
+TOPOLOGY_METRIC_SPECS = [
+    ("strength", "strength"),
+    ("clustering", "clustering_coefficient"),
+    ("closeness", "closeness_centrality"),
+    ("eccentricity", "eccentricity_centrality"),
+    ("betweenness", "betweenness"),
+]
 
 GRAND_RETRY = Retry(
     total=3,
@@ -121,6 +130,127 @@ def _repair_probable_broken_ensembl_ids(records, valid_target_ids):
     return repaired, changed, recovered
 
 
+def _repair_disorder_records(records, valid_target_ids):
+    """
+    Apply conservative ENSG repair heuristic to one disorder's DEG records.
+    Returns repaired records and diagnostic stats.
+    """
+    records = records or []
+    raw_degset = {rec[0] for rec in records if rec}
+    raw_target_overlap = len(valid_target_ids & raw_degset)
+    low_overlap_threshold = max(10, int(0.01 * max(1, len(raw_degset))))
+
+    stats = {
+        "repair_applied": False,
+        "changed_records": 0,
+        "recovered_records": 0,
+        "raw_target_overlap": raw_target_overlap,
+        "repaired_target_overlap": raw_target_overlap,
+    }
+
+    repaired_records = records
+    if raw_target_overlap < low_overlap_threshold:
+        candidate_records, changed_count, recovered_count = _repair_probable_broken_ensembl_ids(
+            records,
+            valid_target_ids,
+        )
+        repaired_degset = {rec[0] for rec in candidate_records if rec}
+        repaired_overlap = len(valid_target_ids & repaired_degset)
+        if repaired_overlap > raw_target_overlap:
+            repaired_records = candidate_records
+            stats.update(
+                {
+                    "repair_applied": True,
+                    "changed_records": changed_count,
+                    "recovered_records": recovered_count,
+                    "repaired_target_overlap": repaired_overlap,
+                }
+            )
+
+    return repaired_records, stats
+
+
+def _write_repaired_degdata_csv(
+    input_csv_path,
+    output_csv_path,
+    disorders,
+    valid_target_ids,
+):
+    """
+    Write one all-disorder CSV with repaired ENSG IDs, preserving DEGData.csv
+    column order/shape exactly.
+    """
+    with open(input_csv_path, newline="", encoding="utf-8-sig") as infile:
+        reader = csv.reader(infile)
+        all_rows = list(reader)
+
+    if not all_rows:
+        print("warning: DEG input CSV is empty; skipped repaired DEG CSV export")
+        return
+
+    header = all_rows[0]
+    data_rows = all_rows[1:]
+    try:
+        disorder_idx = header.index("DISORDER")
+        gene_idx = header.index("GENEID")
+    except ValueError:
+        print(
+            "warning: could not find DISORDER/GENEID columns; "
+            "skipped repaired DEG CSV export"
+        )
+        return
+
+    disorder_set = set(disorders)
+    row_indices_by_disorder = {d: [] for d in disorders}
+    records_by_disorder = {d: [] for d in disorders}
+
+    for i, row in enumerate(data_rows):
+        if disorder_idx >= len(row):
+            continue
+        disorder_name = row[disorder_idx].strip()
+        if disorder_name not in disorder_set:
+            continue
+        gene_id = row[gene_idx].strip() if gene_idx < len(row) else ""
+        row_indices_by_disorder[disorder_name].append(i)
+        records_by_disorder[disorder_name].append([gene_id])
+
+    total_changed = 0
+    total_recovered = 0
+    applied_disorders = 0
+
+    for disorder_name in disorders:
+        disorder_records = records_by_disorder.get(disorder_name, [])
+        repaired_records, stats = _repair_disorder_records(disorder_records, valid_target_ids)
+        if stats["repair_applied"]:
+            applied_disorders += 1
+            total_changed += stats["changed_records"]
+            total_recovered += stats["recovered_records"]
+            print(
+                f"{disorder_name} DEG CSV repair: changed {stats['changed_records']} "
+                f"records, recovered {stats['recovered_records']} GRN target matches "
+                f"({stats['raw_target_overlap']} -> {stats['repaired_target_overlap']})"
+            )
+
+        for row_i, repaired_rec in zip(row_indices_by_disorder[disorder_name], repaired_records):
+            if not repaired_rec:
+                continue
+            if gene_idx >= len(data_rows[row_i]):
+                data_rows[row_i].extend([""] * (gene_idx - len(data_rows[row_i]) + 1))
+            data_rows[row_i][gene_idx] = repaired_rec[0]
+
+    with open(output_csv_path, "w", newline="", encoding="utf-8") as outfile:
+        writer = csv.writer(outfile)
+        writer.writerow(header)
+        writer.writerows(data_rows)
+
+    print(
+        "wrote repaired DEG csv:",
+        output_csv_path,
+        f"(repair applied in {applied_disorders} disorders;",
+        f"records changed={total_changed}; recovered={total_recovered})",
+    )
+
+
 # INSTRUCTIONS: RUN WHILE IN SRC FOLDER
 def main():
 
@@ -134,11 +264,12 @@ def main():
     # get the combined GRAND GRN (what check can I use?)
     brainother = gu.make_adjlist('data/Brain_Other.csv', GRN_ZSCORE_THRESHOLD)
     brainbg = gu.make_adjlist('data/Brain_Basal_Ganglia.csv', GRN_ZSCORE_THRESHOLD)
+    braincerebellum = gu.make_adjlist('data/Brain_Cerebellum.csv', GRN_ZSCORE_THRESHOLD)
 
-    # merge the two brain GRNs and test the merge behavior
-    brains = gu.merge_adjlist(brainother, brainbg)
+    # merge the brain GRNs and test the merge behavior
+    brains = gu.merge_adjlist(brainother, brainbg, braincerebellum)
     if RUN_TESTS:
-        test_merge_adjlist(brainother, brainbg, brains)
+        test_merge_adjlist(brainother, brainbg, braincerebellum, brains)
     grn = gu.ensemblify_targets(brains)
     
     # produce text file of adjlist
@@ -147,14 +278,15 @@ def main():
         grn,
         "results/full_brain_grn_weighted_edgelist.txt",
     )
-    full_ppi_path = os.path.join(gu.WALKER_INPUT_PPI_DIR, "full_brain_grn.ppi")
-    gu.write_walker_ppi(grn, full_ppi_path)
-    print("wrote Walker .ppi:", full_ppi_path)
+    # PPI export disabled per request.
+    # full_ppi_path = os.path.join(gu.WALKER_INPUT_PPI_DIR, "full_brain_grn.ppi")
+    # gu.write_walker_ppi(grn, full_ppi_path)
+    # print("wrote Walker .ppi:", full_ppi_path)
     # TF/source nodes remain symbols; target genes are mapped to ENSG where possible.
     ensg_tfs = [tf for tf in grn if gu.ENSEMBL_ID_RE.match(tf)]
     target_nodes = {gene for edges in grn.values() for gene, _ in edges}
     ensg_targets = [gene for gene in target_nodes if gu.ENSEMBL_ID_RE.match(gene)]
-    print("TFs mapped to ENSG:", len(ensg_tfs), "of", len(grn))
+    # print("TFs mapped to ENSG:", len(ensg_tfs), "of", len(grn))
     print("targets mapped to ENSG:", len(ensg_targets), "of", len(target_nodes))
     grn_target_nodes = set(target_nodes)
 
@@ -162,19 +294,32 @@ def main():
     ## (options = AD, ADHD, BD, SZ, MDD, OCD) and the file location, outputting a list of lists
     disorders = ['AD', 'ADHD', 'ASD', 'BD', 'MDD', 'OCD', 'SZ']
     data_path = 'data/DEGData.csv'
+    repaired_deg_csv_path = "results/DEGData_repaired_ENSG_all_disorders.csv"
+    _write_repaired_degdata_csv(
+        data_path,
+        repaired_deg_csv_path,
+        disorders,
+        grn_target_nodes,
+    )
     degs = {d: gu.disorder_list(data_path, d) for d in disorders}
 
-    # per-disorder outputs (the by-name suffix allows us to 
+    # per-disorder outputs
     tf_grn_by_name = {}
     deg_grn_by_name = {}
     detf_deggrn_by_name = {}
+    network_variants_by_name = {}
     reg_scores_by_name = {}
     tf_regulators_by_name = {}
     edgeweight_summary_by_name = {}
     log2fc_summary_by_name = {}
-    bipartite_reports_by_name = {}
+    variant_labels = ("deggrn", "detfdeggrn", "detfgrn")
+    network_variants_by_name = {
+        disorder: {label: {} for label in variant_labels}
+        for disorder in disorders
+    }
+    bipartite_reports_by_variant = {label: {} for label in variant_labels}
+    bipartite_stat_rows_by_variant = {label: [] for label in variant_labels}
     summary_rows = []
-    bipartite_stat_rows = []
     deg_gene_sets = {}
     tf_edge_sets = {}
     study_sets = {}
@@ -183,32 +328,19 @@ def main():
 
     for name, data in degs.items():
         if data is None:
+            print(f"warning: no DEG rows for {name}; generating empty graph outputs")
             continue
 
         print("\n", "adjacency lists generated for", name)
         raw_data = data  # keep original DEG Gene ID symbols for TF overlap checks
+        raw_data, repair_stats = _repair_disorder_records(raw_data, grn_target_nodes)
         raw_degset = {row[0] for row in raw_data if row}
-        raw_target_overlap = len(grn_target_nodes & raw_degset)
-
-        # Some source tables contain malformed ENSG IDs (e.g., version suffix
-        # leakage into the stable ID). Attempt a conservative repair only when
-        # target overlap is very low.
-        low_overlap_threshold = max(10, int(0.01 * max(1, len(raw_degset))))
-        if raw_target_overlap < low_overlap_threshold:
-            repaired_data, repaired_count, recovered_count = _repair_probable_broken_ensembl_ids(
-                raw_data,
-                grn_target_nodes,
+        if repair_stats["repair_applied"]:
+            print(
+                f"{name} DEG ID repair: changed {repair_stats['changed_records']} records, "
+                f"recovered {repair_stats['recovered_records']} GRN target matches "
+                f"({repair_stats['raw_target_overlap']} -> {repair_stats['repaired_target_overlap']})"
             )
-            repaired_degset = {row[0] for row in repaired_data if row}
-            repaired_overlap = len(grn_target_nodes & repaired_degset)
-            if repaired_overlap > raw_target_overlap:
-                raw_data = repaired_data
-                raw_degset = repaired_degset
-                print(
-                    f"{name} DEG ID repair: changed {repaired_count} records, "
-                    f"recovered {recovered_count} GRN target matches "
-                    f"({raw_target_overlap} -> {repaired_overlap})"
-                )
 
         data = gu.ensemblifylist(raw_data)  # target gene processes remain ENSG-based
         degs[name] = data
@@ -226,16 +358,32 @@ def main():
 
         # build DEG-filtered GRNs per disorder using mixed IDs:
         # TF/source overlap by raw DEG Gene ID symbols, targets by ENSG IDs.
-        tf_grn = gu.de_grn_tfsonly(grn, data, tf_degset=raw_degset)
+        tf_grn = gu.de_grn_detfgrn(
+            grn,
+            data,
+            tf_degset=raw_degset,
+            strict_tf_filter=False,
+        )
         deg_grn = gu.de_grn_degsonly(grn, data, tf_degset=raw_degset)
-        # Backward-compatible naming used in earlier analyses/prints.
-        # In this pipeline, DETF_DEGGRN corresponds to the TF-DEG filtered GRN.
-        detf_deggrn = tf_grn
+        
+        # Strict DETF-DEG network: both TF and target must be DE.
+        detf_deggrn = gu.de_grn_tfsonly(
+            grn,
+            data,
+            tf_degset=raw_degset,
+            strict_tf_filter=True,
+        )
 
         # store by disorder name
         tf_grn_by_name[name] = tf_grn
         deg_grn_by_name[name] = deg_grn
         detf_deggrn_by_name[name] = detf_deggrn
+        network_variants = {
+            "deggrn": deg_grn,
+            "detfdeggrn": detf_deggrn,
+            "detfgrn": tf_grn,
+        }
+        network_variants_by_name[name] = network_variants
         gu.write_weighted_edgelist_txt(
             tf_grn,
             f"results/{name.lower()}_tf_grn_weighted_edgelist.txt",
@@ -244,28 +392,29 @@ def main():
             deg_grn,
             f"results/{name.lower()}_deg_grn_weighted_edgelist.txt",
         )
-        deg_ppi_path = os.path.join(
-            gu.WALKER_INPUT_PPI_DIR, f"{name.lower()}_deg_grn.ppi"
-        )
-        tf_ppi_path = os.path.join(
-            gu.WALKER_INPUT_PPI_DIR, f"{name.lower()}_tf_grn.ppi"
-        )
-        gu.write_walker_ppi(deg_grn, deg_ppi_path)
-        gu.write_walker_ppi(tf_grn, tf_ppi_path)
-        seed_txt_path = os.path.join(
-            gu.WALKER_INPUT_SEED_DIR, f"{name.lower()}_seed.txt"
-        )
-        gu.save_adj_list_as_txt(deg_grn, seed_txt_path)
-        print("wrote Walker .ppi:", deg_ppi_path)
-        print("wrote Walker .ppi:", tf_ppi_path)
-        print("wrote Walker seed .txt:", seed_txt_path)
+        # Per-disorder PPI/seed exports disabled per request.
+        # deg_ppi_path = os.path.join(
+        #     gu.WALKER_INPUT_PPI_DIR, f"{name.lower()}_deg_grn.ppi"
+        # )
+        # tf_ppi_path = os.path.join(
+        #     gu.WALKER_INPUT_PPI_DIR, f"{name.lower()}_tf_grn.ppi"
+        # )
+        # gu.write_walker_ppi(deg_grn, deg_ppi_path)
+        # gu.write_walker_ppi(tf_grn, tf_ppi_path)
+        # seed_txt_path = os.path.join(
+        #     gu.WALKER_INPUT_SEED_DIR, f"{name.lower()}_seed.txt"
+        # )
+        # gu.save_adj_list_as_txt(deg_grn, seed_txt_path)
+        # print("wrote Walker .ppi:", deg_ppi_path)
+        # print("wrote Walker .ppi:", tf_ppi_path)
+        # print("wrote Walker seed .txt:", seed_txt_path)
 
         # naming system for quick access
         globals()[f"{name.lower()}_tf_grn"] = tf_grn
         globals()[f"{name.lower()}_deg_grn"] = deg_grn
 
         # apply graph_algos to each disorder-specific GRN
-        reg_scores_by_name[name] = ga.regulatory_scores(tf_grn)
+        reg_scores_by_name[name] = ga.regulatory_scores(detf_deggrn)
         tf_regulators_by_name[name] = ga.regulator_detection(tf_grn, data)
         edgeweight_summary_by_name[name] = ga.edgeweight_summary(
             grn,
@@ -277,23 +426,22 @@ def main():
             "tf_grn": ga.log2fc_summary(tf_grn),
             "deg_grn": ga.log2fc_summary(deg_grn),
         }
-        bipartite_reports_by_name[name] = ga.disorder_bipartite_report(
-            tf_grn,
-            name,
-            outdir="results",
-        )
-        bipartite_stat_rows.extend(
-            ga.disorder_bipartite_stat_rows(
-                name,
-                bipartite_reports_by_name[name],
+        for variant, variant_adj in network_variants.items():
+            report = ga.disorder_bipartite_report(
+                variant_adj,
+                f"{variant}_{name}",
+                outdir="results",
             )
-        )
+            bipartite_reports_by_variant[variant][name] = report
+            bipartite_stat_rows_by_variant[variant].extend(
+                ga.disorder_bipartite_stat_rows(name, report)
+            )
 
         # collect per-disorder summary row for CSV
         disorder_row = ga.disorder_summary_row(
             name=name,
             disorderlist=data,
-            detf_deggrn=tf_grn,
+            detf_deggrn=detf_deggrn,
             tf_grn=tf_grn,
             deg_grn=deg_grn,
             reg_scores=reg_scores_by_name[name],
@@ -303,7 +451,7 @@ def main():
         disorder_row.update(
             ga.disorder_bipartite_summary_row(
                 name,
-                bipartite_reports_by_name[name],
+                bipartite_reports_by_variant["detfgrn"].get(name, {}),
             )
         )
         summary_rows.append(disorder_row)
@@ -341,17 +489,57 @@ def main():
         print(f"  log2fc summary (detf_deggrn): {log2fc_summary_by_name[name]['detf_deggrn']}")
         print(f"  log2fc summary (tf_grn): {log2fc_summary_by_name[name]['tf_grn']}")
         print(f"  log2fc summary (deg_grn): {log2fc_summary_by_name[name]['deg_grn']}")
-        print(f"  bipartite boxplot file: {bipartite_reports_by_name[name]['boxplot_file']}")
-        print(f"  bipartite violin file: {bipartite_reports_by_name[name]['violinplot_file']}")
+        for variant in variant_labels:
+            report = bipartite_reports_by_variant[variant].get(name, {})
+            print(f"  {variant} bipartite boxplot file: {report.get('boxplot_file', '')}")
+            print(f"  {variant} bipartite violin file: {report.get('violinplot_file', '')}")
+
+    # Re-render bipartite box/violin panels with shared y-limits per metric
+    # so values are directly comparable across disorders, within each variant.
+    for variant in variant_labels:
+        shared_y_limits = ga.metric_panel_y_limits(
+            [
+                report.get("metric_data")
+                for report in bipartite_reports_by_variant[variant].values()
+                if report
+            ]
+        )
+        bipartite_stat_rows_by_variant[variant] = []
+        for name, network_variants in network_variants_by_name.items():
+            prior_report = bipartite_reports_by_variant[variant].get(name, {})
+            report = ga.disorder_bipartite_report(
+                network_variants.get(variant, {}),
+                f"{variant}_{name}",
+                outdir="results",
+                y_limits=shared_y_limits,
+                metric_data=prior_report.get("metric_data"),
+            )
+            bipartite_reports_by_variant[variant][name] = report
+            bipartite_stat_rows_by_variant[variant].extend(
+                ga.disorder_bipartite_stat_rows(name, report)
+            )
+
+    # Keep healthy panels on the same metric axes as disorder panels.
+    disorder_metric_data = [
+        report.get("metric_data")
+        for variant in variant_labels
+        for report in bipartite_reports_by_variant[variant].values()
+        if report
+    ]
+    shared_disorder_y_limits = ga.metric_panel_y_limits(disorder_metric_data)
+    healthy_bipartite_report = ga.disorder_bipartite_report(
+        grn,
+        "healthy_brain_grn",
+        outdir="results",
+        y_limits=shared_disorder_y_limits,
+    )
+    healthy_bipartite_stat_rows = ga.disorder_bipartite_stat_rows(
+        "Healthy_Brain_GRN",
+        healthy_bipartite_report,
+    )
 
     # visualize graphs per disorder and network variant
-    for name in tf_grn_by_name:
-        network_variants = {
-            "deggrn": deg_grn_by_name.get(name, {}),
-            "detfdeggrn": detf_deggrn_by_name.get(name, {}),
-            "detfgrn": tf_grn_by_name.get(name, {}),
-        }
-
+    for name, network_variants in network_variants_by_name.items():
         for label, net_adj in network_variants.items():
             net_viz = gu.aggregate_tf_gene_edges(net_adj, weight_agg="mean")
             net_edgelist = gu.adjlist2edgelist(net_viz)
@@ -372,27 +560,83 @@ def main():
                 interactive=VIZ_INTERACTIVE,
                 stabilization_iterations=VIZ_STABILIZATION_ITERATIONS,
             )
+    expected_html = []
+    for name in disorders:
+        for label in variant_labels:
+            expected_html.append(f"results/{label}_{name.lower()}.html")
+            expected_html.append(f"results/pyviz_{label}_{name.lower()}.html")
+    missing_html = [path for path in expected_html if not os.path.exists(path)]
+    if missing_html:
+        print("warning: missing graph html outputs:")
+        for path in missing_html:
+            print(" ", path)
+    else:
+        print(
+            "confirmed graph html outputs:",
+            f"{len(expected_html)} files across {len(disorders)} disorders and {len(variant_labels)} graph types",
+        )
 
     # write CSV comparisons
     ga.write_csv(summary_rows, "results/deggrn_disorder_summary.csv")
+    combined_bipartite_stat_rows = []
+    for variant in variant_labels:
+        variant_stat_rows = bipartite_stat_rows_by_variant[variant]
+        ga.write_csv(
+            variant_stat_rows,
+            f"results/{variant}_bipartite_metric_stats.csv",
+        )
+        combined_bipartite_stat_rows.extend(
+            [{"graph_type": variant, **row} for row in variant_stat_rows]
+        )
+        gv.viz_bipartite_metric_stats(
+            variant_stat_rows,
+            f"results/{variant}_bipartite_metric_stats_heatmap.png",
+            disorder_order=disorders,
+        )
+        gv.viz_strength_stat_summary(
+            variant_stat_rows,
+            f"results/{variant}_strength_stats_summary.png",
+            legend_outfile=f"results/{variant}_strength_stats_figure_legend.txt",
+            disorder_order=disorders,
+        )
+        print(
+            "wrote bipartite metric comparison plot:",
+            f"results/{variant}_bipartite_metric_stats_heatmap.png",
+        )
+
     ga.write_csv(
-        bipartite_stat_rows,
-        "results/deggrn_bipartite_metric_stats.csv",
+        healthy_bipartite_stat_rows,
+        "results/healthy_brain_grn_bipartite_metric_stats.csv",
     )
-    gv.viz_bipartite_metric_stats(
-        bipartite_stat_rows,
-        "results/deggrn_bipartite_metric_stats_heatmap.png",
-        disorder_order=disorders,
+    combined_bipartite_stat_rows.extend(
+        [{"graph_type": "healthy_brain_grn", **row} for row in healthy_bipartite_stat_rows]
     )
-    gv.viz_strength_stat_summary(
-        bipartite_stat_rows,
-        "results/deggrn_strength_stats_summary.png",
-        legend_outfile="results/deggrn_strength_stats_figure_legend.txt",
-        disorder_order=disorders,
-    )
+    if combined_bipartite_stat_rows:
+        ga.write_csv(
+            combined_bipartite_stat_rows,
+            "results/combined_bipartite_metric_stats.csv",
+            fieldnames=[
+                "graph_type",
+                "disorder",
+                "metric",
+                "u_statistic",
+                "p_value",
+                "cliffs_delta",
+                "tf_mean",
+                "gene_mean",
+                "tf_median",
+                "gene_median",
+                "n_tf",
+                "n_gene",
+            ],
+        )
+        print(
+            "wrote combined bipartite stats csv:",
+            "results/combined_bipartite_metric_stats.csv",
+        )
     print(
-        "wrote bipartite metric comparison plot:",
-        "results/deggrn_bipartite_metric_stats_heatmap.png",
+        "wrote healthy GRN bipartite boxplot:",
+        healthy_bipartite_report.get("boxplot_file", ""),
     )
     ga.write_csv(
         ga.pairwise_jaccard_rows(deg_gene_sets),
@@ -678,6 +922,118 @@ def main():
                 f.write(tf + "\n")
 
 
+    def _cluereg_signature_filename(label, entity_label, direction, n):
+        """
+        Build a clear, descriptive signature filename.
+        Example:
+          cluereg_ad_top100_most_positive_differentially_targeted_genes.txt
+        """
+        return (
+            "results/"
+            f"cluereg_{label}_top{n}_{direction}_"
+            f"differentially_targeted_{entity_label}.txt"
+        )
+
+
+    def _tf_topology_metric_map(adjlist, metric_name="betweenness", deg_gene_candidates=None):
+        G, tf_nodes, gene_nodes = ga.grn_to_bipartite_digraph(adjlist)
+        if not tf_nodes:
+            return {}
+
+        if metric_name == "strength":
+            metric_map = {
+                node: float(
+                    G.in_degree(node, weight="abs_weight")
+                    + G.out_degree(node, weight="abs_weight")
+                )
+                for node in G.nodes
+            }
+        elif metric_name == "closeness":
+            metric_map = ga.closeness_centralities(adjlist, mode="out")
+        elif metric_name == "eccentricity":
+            metric_map = ga.eccentricity_centralities(adjlist, mode="out")
+        elif metric_name == "clustering":
+            metric_map = ga.calculate_bipartite_clustering_coeff(adjlist)
+        elif metric_name == "betweenness":
+            # TF betweenness over shortest paths BETWEEN DEG target-gene pairs.
+            # Use an undirected bipartite graph so gene<->TF<->gene paths exist.
+            U = G.to_undirected()
+            if deg_gene_candidates is None:
+                deg_gene_nodes = sorted(gene_nodes)
+            else:
+                deg_gene_nodes = sorted(
+                    {
+                        ("Gene", gene)
+                        for gene in deg_gene_candidates
+                        if ("Gene", gene) in U
+                    }
+                )
+
+            metric_map = dict.fromkeys(U.nodes, 0.0)
+            if len(deg_gene_nodes) >= 2:
+                raw_map = ga.nx.betweenness_centrality_subset(
+                    U,
+                    sources=deg_gene_nodes,
+                    targets=deg_gene_nodes,
+                    normalized=False,
+                    weight="distance",
+                )
+                # Average contribution across unordered DEG-gene pairs.
+                n_pairs = (len(deg_gene_nodes) * (len(deg_gene_nodes) - 1)) / 2.0
+                if n_pairs > 0:
+                    for node, val in raw_map.items():
+                        metric_map[node] = float(val) / n_pairs
+        else:
+            metric_map = ga.betweenness_centralities(adjlist, normalized=True)
+
+        tf_metric = {}
+        for tf_node in tf_nodes:
+            tf = tf_node[1]
+            try:
+                val = float(metric_map.get(tf_node, 0.0))
+            except (TypeError, ValueError):
+                val = 0.0
+            if val != val:  # NaN guard
+                val = 0.0
+            tf_metric[tf] = val
+        return tf_metric
+
+
+    def _write_topology_vs_healthy(disorder_name, disorder_adj, healthy_adj, deg_gene_candidates=None):
+        outputs = []
+        for metric_name, metric_slug in TOPOLOGY_METRIC_SPECS:
+            disorder_metrics = _tf_topology_metric_map(
+                disorder_adj,
+                metric_name,
+                deg_gene_candidates=deg_gene_candidates,
+            )
+            healthy_metrics = _tf_topology_metric_map(
+                healthy_adj,
+                metric_name,
+                deg_gene_candidates=deg_gene_candidates,
+            )
+
+            ranked_tfs = sorted(
+                disorder_metrics.items(),
+                key=lambda kv: (-kv[1], str(kv[0])),
+            )[:TOPOLOGY_TOP_N]
+
+            out_txt = (
+                f"results/{disorder_name.lower()}_top{TOPOLOGY_TOP_N}_"
+                f"tfs_{metric_slug}_vs_healthy.txt"
+            )
+            with open(out_txt, "w") as f:
+                f.write(f"TF\thealthy_{metric_slug}\n")
+                for tf, _ in ranked_tfs:
+                    f.write(f"{tf}\t{healthy_metrics.get(tf, 0.0):.10g}\n")
+            outputs.append({
+                "metric": metric_slug,
+                "path": out_txt,
+                "rows": len(ranked_tfs),
+            })
+        return outputs
+
+
     def _extract_csrf_token(html_text):
         m = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', html_text)
         return m.group(1) if m else None
@@ -795,6 +1151,18 @@ def main():
 
         detf_net = tf_grn_by_name.get(name, {})
         deg_net = deg_grn_by_name.get(name, {})
+        deg_gene_candidates = {
+            edge[0]
+            for edges in deg_net.values()
+            for edge in edges
+            if edge
+        }
+        topology_outputs = _write_topology_vs_healthy(
+            name,
+            detf_net,
+            grn,
+            deg_gene_candidates=deg_gene_candidates,
+        )
 
         # TF signatures from DETF_GRN
         tf_diff_scores = _differential_targeting_api(
@@ -817,12 +1185,7 @@ def main():
             deg_net,
         )
         gene_diff_scores_by_name[name] = gene_diff_scores
-        gene_candidates = {
-            edge[0]
-            for edges in deg_net.values()
-            for edge in edges
-            if edge
-        }
+        gene_candidates = deg_gene_candidates
         gene_pos100, gene_neg100 = _top_n_signature(
             gene_diff_scores,
             key_name="Gene",
@@ -870,6 +1233,46 @@ def main():
             f"results/cluereg_{name.lower()}_gene_negative.txt",
         )
 
+        # Clear-label exports for the most relevant differential-targeting outputs.
+        _write_cluereg_file(
+            gene_pos100,
+            _cluereg_signature_filename(
+                name.lower(),
+                "genes",
+                "most_positive",
+                CLUE_TOP_N,
+            ),
+        )
+        _write_cluereg_file(
+            gene_neg100,
+            _cluereg_signature_filename(
+                name.lower(),
+                "genes",
+                "most_negative",
+                CLUE_TOP_N,
+            ),
+        )
+
+        mode_entity = "genes" if CLUE_SIGNATURE_MODE == "gene" else "tfs"
+        _write_cluereg_file(
+            pos100,
+            _cluereg_signature_filename(
+                name.lower(),
+                mode_entity,
+                "most_positive",
+                CLUE_TOP_N,
+            ),
+        )
+        _write_cluereg_file(
+            neg100,
+            _cluereg_signature_filename(
+                name.lower(),
+                mode_entity,
+                "most_negative",
+                CLUE_TOP_N,
+            ),
+        )
+
         _cluereg_query(
             pos100,
             neg100,
@@ -900,6 +1303,13 @@ def main():
             len(gene_neg100),
             "bottom",
         )
+        for topo in topology_outputs:
+            print(
+                name,
+                f"topology file ({topo['metric']}):",
+                topo["path"],
+                f"rows={topo['rows']}",
+            )
 
     _, _, ffl_rows, fbl_rows = gu.detect_regulatory_loops(
         degs,
@@ -917,7 +1327,7 @@ def main():
     )
 
 
-def test_merge_adjlist(brainother, brainbg, brains):
+def test_merge_adjlist(brainother, brainbg, braincerebellum, brains):
     def _edge_set(adj):
         return {(tf, gene) for tf, edges in adj.items() for gene, _ in edges}
 
@@ -926,12 +1336,14 @@ def test_merge_adjlist(brainother, brainbg, brains):
 
     edges_other = _edge_set(brainother)
     edges_bg = _edge_set(brainbg)
+    edges_cerebellum = _edge_set(braincerebellum)
     edges_merged = _edge_set(brains)
 
-    # 1) merged contains all edges from both inputs
+    # 1) merged contains all edges from all inputs
     assert edges_other.issubset(edges_merged)
     assert edges_bg.issubset(edges_merged)
-    assert edges_merged == edges_other | edges_bg
+    assert edges_cerebellum.issubset(edges_merged)
+    assert edges_merged == edges_other | edges_bg | edges_cerebellum
 
     # 2) overlap is on edges (TF, Gene), not just TF keys
     edge_overlap = edges_other & edges_bg
